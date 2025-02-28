@@ -1,0 +1,518 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Feb  7 13:33:44 2025
+
+@author: Labadmin
+"""
+import os
+import rasterio
+import numpy as np
+from pathlib import Path
+from rasterio.enums import Resampling
+import pickle
+from tqdm import tqdm
+import pandas as pd
+from scipy.ndimage import binary_dilation
+
+import fitrimap
+from fitrimap.utils.geospatial_utils import crop_master_to_tif, resize_tif
+from fitrimap.fuels.recode_fuelmap import recode_fuelmap_RSI
+from fitrimap.topography.get_topo_indices import create_topo_indices
+from fitrimap.fire.shp_to_tif import ABoVE_shp_to_tif
+from fitrimap.dataset_creation.normalize import get_dataset_stats, normalize_dataset
+from fitrimap.dataset_creation.dataset_tools import plot_dataset_histograms, validate_dataset, replace_dataset_nans
+
+
+def create_hybrid_dataset():
+    # DELETE THIS LATER
+    os.chdir(r'D:\!Research\01 - Python\Piyush\CNN Fire Prediction\Raw Hybrid 128')
+    nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ISI'
+    for fire_id in os.listdir():
+        if os.path.isdir(fire_id):
+            print(fire_id)
+            # Get path to fuelmap
+            fid = fire_id.replace('_piyush', '')
+            output_path = os.path.join(fire_id, 'Indices', f'{fid}_RSI.tif')
+            if os.path.exists(output_path):
+                continue
+            fuelmap_path = os.path.join(fire_id, 'Cropped', f'{fire_id}_fuelmap.tif')
+
+            # Get year
+            year = int(fid[:4])
+
+            # Get avg DoY
+            krig_tif = os.path.join(fire_id, f'{fid}_krig.tif')
+            with rasterio.open(krig_tif) as src:
+                data = src.read()
+                # Get the average value in data excluding 0 and nan
+                mask = (data != 0) & (~np.isnan(data))
+
+                # Apply mask to filter out zeros and NaNs
+                filtered_data = data[mask]
+
+                # Calculate the average value of the filtered data
+                avg_value = filtered_data.mean() if filtered_data.size > 0 else np.nan  # Handle case if no valid data
+                try:
+                    doy = int(avg_value)
+                except:
+                    continue
+
+            recode_fuelmap_RSI(fuelmap_path, output_path, doy, year, nc4_dir)
+
+
+def get_data(dataset_dir,
+             fire_rasters,
+             master_fuelmap_dir,
+             master_dem_path,
+             fwi_nc4_dir):
+    # Make the dataset directory
+    os.makedirs(dataset_dir, exist_ok=True)
+
+    # Open the master dem (doing it here saves time)
+    master_dem = rasterio.open(master_dem_path)
+
+    prev_year = None
+    pbar = tqdm(total=len(fire_rasters), desc='Getting fuels, topography, and weather')
+    for fire_raster in fire_rasters:
+        # Get fire raster, init data paths
+        h, t = os.path.split(fire_raster)
+        fire_id = t.lower().replace('_burn.tif', '')
+        fire_dir = os.path.join(dataset_dir, fire_id)
+        fuelmap_path = os.path.join(fire_dir, f'{fire_id}_fuelmap.tif')
+        topo_path = os.path.join(fire_dir, f'{fire_id}_elevation.tif')
+
+        # Get year, open fuelmap raster
+        year = int(fire_id[:4])
+        if year != prev_year:
+            master_fuelmap_path = os.path.join(master_fuelmap_dir, f'3979_FBP-{year}-100m.tif')
+            master_fuelmap = rasterio.open(master_fuelmap_path)
+
+        # Check if data already exists; if so, skip
+        if os.path.exists(fuelmap_path) and os.path.exists(topo_path):
+            pbar.update(1)
+            continue
+
+        with rasterio.open(fire_raster) as src:
+            data = src.read()
+            # Get the average value in data excluding 0 and nan
+            mask = (data != 0) & (~np.isnan(data))
+
+            # Apply mask to filter out zeros and NaNs
+            filtered_data = data[mask]
+
+            # Calculate the average value of the filtered data
+            avg_value = np.median(filtered_data) if filtered_data.size > 0 else np.nan  # Handle case if no valid data
+
+            # Get dates
+            # TODO: Technically, we need a new fuelmap for each day
+            doy = int(avg_value)
+
+        # Crop and recode fuel map
+        crop_master_to_tif(master_fuelmap, fire_raster, fuelmap_path, buffer=0)
+        output_fuelmap = os.path.join(fire_dir, f'{fire_id}_RSI.tif')
+        recode_fuelmap_RSI(fuelmap_path, output_fuelmap, doy, year, fwi_nc4_dir)
+
+        # Crop and calculate topography indices
+        crop_master_to_tif(master_dem, fire_raster, topo_path, buffer=0)
+        create_topo_indices(topo_path, fire_dir)
+
+        # TODO: get weather
+        pbar.update(1)
+        prev_year = year
+    pbar.close()
+
+
+def resize_dataset(dataset_dir,
+                   shape=(128, 128)):
+    resized_imgs = []
+    # Iterate through the dataset
+    dataset_path = Path(dataset_dir)
+    pbar = tqdm(total=len(os.listdir(dataset_dir)), desc='Resizing dataset')
+    for folder in dataset_path.iterdir():
+        if folder.is_dir():
+            for tif_file in folder.glob('*.tif'):
+                if '_burn' in tif_file.name:
+                    resampling_method = Resampling.mode
+                else:
+                    resampling_method = Resampling.nearest
+
+                resized_tif = resize_tif(os.path.join(folder, tif_file.name),
+                                         shape=shape,
+                                         resampling_method=resampling_method)
+                resized_imgs.append(resized_tif)
+        pbar.update(1)
+
+    pbar.close()
+    return resized_imgs
+
+
+def fire_stats(dataset_dir, output_csv):
+    # Create an empty DataFrame to store all results
+    df = pd.DataFrame(columns=['fire_id', 'burn_day', 'area', 'area_percentage', 'num_px'])
+
+    # Iterate through each fire_id directory in the raw_dir
+    pbar = tqdm(total=len(os.listdir(dataset_dir)), desc='Calculating fire growth stats')
+    for fire_id in os.listdir(dataset_dir):
+        fire_dir = os.path.join(dataset_dir, fire_id)
+        if os.path.isdir(fire_dir):
+            fid = '_'.join(fire_id.split('_')[:2])
+            burn_file = os.path.join(fire_dir, f'{fid}_burn.tif')
+            # Load the krig_file using rasterio
+            with rasterio.open(burn_file) as src:
+                raster_data = src.read(1)  # Read the first (and only) channel
+
+                # Get unique values from the raster data
+                vals = raster_data[(raster_data != 0) & (~np.isnan(raster_data))]
+                vals = np.unique(vals)
+
+                # Calculate the area for each unique value
+                pixel_area = src.res[0] * src.res[1]  # Area of a single pixel in the same unit as the CRS
+                results = []
+                areas = [0]
+
+                for val in vals:
+                    # Number of pixels burning
+                    num_px = np.sum(raster_data == val)
+
+                    # Area burning
+                    area = np.sum(raster_data == val) * pixel_area
+
+                    # New area burned as a percentage of previously burned area (can be > 1)
+                    area_per = area / sum(areas)
+
+                    # Handle div 0
+                    if area_per > 1e99:
+                        area_per = 1
+                    areas.append(area)
+                    results.append([fire_id, val, area, area_per, num_px])
+
+                # Append the results to the DataFrame
+                df = pd.concat([df, pd.DataFrame(results, columns=['fire_id', 'burn_day', 'area', 'area_percentage', 'num_px'])], ignore_index=True)
+        pbar.update(1)
+    pbar.close()
+    # Save the DataFrame to a CSV file
+    df.to_csv(output_csv, index=False)
+
+
+def make_csv(dataset_dir, stats_csv, output_csv, growth_thresh=0, val_percentage=0.1, test_percentage=0.1, subset=None):
+    # Initialize vars
+    df = pd.DataFrame(columns=['Split', 'Fire_ID', 'Burn Day', 'Previous Day (1)', 'Previous Day (2)'])
+    jj = 0
+
+    # Load statistics
+    stats_df = pd.read_csv(stats_csv)
+
+    if not subset:
+        subset = os.listdir(dataset_dir)
+
+    # Iterate through directories in the input directory
+    pbar = tqdm(total=len(subset), desc='Making dataset csv')
+    for fire_id in subset:
+        if os.path.isdir(os.path.join(dataset_dir, fire_id)):
+            fid = '_'.join(fire_id.split('_')[:2])
+
+            # Open the raster file
+            raster_path = os.path.join(dataset_dir, fire_id, f'{fid}_burn.tif')
+            with rasterio.open(raster_path) as src:
+                raster_data = src.read(1)  # Read the first band
+
+            # Get unique values from the raster data
+            days_of_year = raster_data[(raster_data != 0) & (~np.isnan(raster_data))]
+            days_of_year = np.unique(days_of_year)
+            days_of_year = sorted(days_of_year)
+
+            # Iterate through the days of year
+            for i in range(2, len(days_of_year)):
+                # Get the 'day of burn'
+                burn_day = days_of_year[i]
+                # Get the previous days
+                prev_day_1 = days_of_year[i - 1]
+                prev_day_2 = days_of_year[i - 2]
+
+                # Check that there is continuous data over three days
+                cond1 = prev_day_1 == (burn_day - 1)
+                cond2 = prev_day_2 == (burn_day - 2)
+
+                if cond1 and cond2:
+                    fire_stats = stats_df[(stats_df['fire_id'] == fire_id) & (stats_df['burn_day'] == burn_day)]
+                    per_value = fire_stats['area_percentage'].values[0]
+                    num_px = fire_stats['num_px'].values[0]
+
+                    # Check that the fire grows enough
+                    if per_value < growth_thresh:
+                        continue
+
+                    # Check that is burns more than 25 pixels
+                    if num_px < 25:
+                        continue
+
+                    # Check that burn_day is adjacent to the previous day
+                    burn_day_mask = (raster_data == burn_day)
+                    prev_day_mask = (raster_data == prev_day_1)
+                    structure = np.ones((3, 3))
+                    prev_day_dilated = binary_dilation(prev_day_mask, structure=structure)
+                    adjacent_check = burn_day_mask & prev_day_dilated
+                    if not adjacent_check.any():
+                        continue
+
+                    # Add to the output df
+                    df.loc[jj] = ['train', fire_id, burn_day, prev_day_1, prev_day_2]
+                    jj += 1
+        pbar.update(1)
+    pbar.close()
+
+    # Get unique fire_ids, shuffle
+    unique_fire_ids = df['Fire_ID'].unique()
+    np.random.shuffle(unique_fire_ids)
+
+    # Split fire_ids into train, val, and test
+    num_val = int(len(unique_fire_ids) * val_percentage)
+    num_test = int(len(unique_fire_ids) * test_percentage)
+    val_fire_ids = unique_fire_ids[:num_val]
+    test_fire_ids = unique_fire_ids[num_val:num_val + num_test]
+    train_fire_ids = unique_fire_ids[num_val + num_test:]
+
+    # Now ensure no duplicates
+    test_fire_ids = list(set(test_fire_ids))
+
+    # Split and print the final sets
+    train_fire_ids = list(set(train_fire_ids) - set(test_fire_ids))  # Remove test fire_ids from train set
+    val_fire_ids = list(set(val_fire_ids) - set(test_fire_ids))  # Remove test fire_ids from val set
+
+    # Assign splits based on fire_id
+    df.loc[df['Fire_ID'].isin(val_fire_ids), 'Split'] = 'val'
+    df.loc[df['Fire_ID'].isin(test_fire_ids), 'Split'] = 'test'
+
+    # Shuffle and save the dataframe to CSV
+    df = df.sample(frac=1).reset_index(drop=True)
+    df.to_csv(os.path.join(dataset_dir, output_csv), index=False)
+
+
+def create_dataset(dataset_dir, processing_options):
+    # TODO: Keep tidying inputs
+    if processing_options['create_rasters']['include']:
+        # Create fire rasters
+        above_shp_dir = processing_options['create_rasters']['above_shp_dir']
+        shape = processing_options['create_rasters']['shape']
+        pkl_dirs = processing_options['create_rasters']['pkl_dirs']
+        size_dict = processing_options['create_rasters']['size_dict']
+        save_pkl = processing_options['create_rasters']['save_pkl']
+        fire_rasters = ABoVE_shp_to_tif(above_shp_dir,
+                                        dataset_dir,
+                                        shape=shape,
+                                        pkl_dirs=pkl_dirs,
+                                        size_dict=size_dict)
+        with open(save_pkl, 'wb') as f:
+            pickle.dump(fire_rasters, f)
+
+    if processing_options['get_data']['include']:
+        # Get the data
+        fire_rasters = processing_options['get_data']['fire_rasters']
+        master_fuelmap_dir = processing_options['get_data']['master_fuelmap_dir']
+        master_dem_path = processing_options['get_data']['master_dem_path']
+        fwi_nc4_dir = processing_options['get_data']['fwi_nc4_dir']
+        get_data(dataset_dir,
+                 fire_rasters,
+                 master_fuelmap_dir,
+                 master_dem_path,
+                 fwi_nc4_dir)
+
+    if processing_options['resize']['include']:
+        # Resize the dataset
+        shape = processing_options['resize']['shape']
+        _ = resize_dataset(dataset_dir, shape=shape)
+
+    if processing_options['sanitize']['include']:
+        # Check all required images exist
+        validate_dataset(dataset_dir, raise_error=True)
+
+        # Replace NaNs with 0
+        replace_dataset_nans(dataset_dir)
+
+    if processing_options['normalize']['include']:
+        # Get dataset normalization values
+        method = processing_options['normalize']['method']
+        variable_stats = get_dataset_stats(dataset_dir)
+
+        # Normalize the dataset
+        normalize_dataset(dataset_dir, variable_stats, method=method)
+
+    if processing_options['get_fire_stats']['include']:
+        stats_csv = processing_options['get_fire_stats']['stats_csv']
+        fire_stats(dataset_dir, stats_csv)
+
+    if processing_options['make_csv']['include']:
+        # Make the dataset csv
+        stats_csv = processing_options['make_csv']['stats_csv']
+        output_csv = processing_options['make_csv']['output_csv']
+        growth_thresh = processing_options['make_csv']['growth_thresh']
+        subset = processing_options['make_csv']['subset']
+        make_csv(dataset_dir,
+                 stats_csv=stats_csv,
+                 output_csv=output_csv,
+                 growth_thresh=growth_thresh,
+                 val_percentage=0.1,
+                 test_percentage=0.1,
+                 subset=subset)
+
+    if processing_options['plot']['include']:
+        # Plot dataset hists
+        print('Plotting...')
+        plot_dataset_histograms(dataset_dir)
+
+    print('\n Done! \n')
+
+
+# %% TODO: Move this to a main
+def OLD(dataset_dir,
+        above_shp_dir,
+        master_fuelmap_path,
+        master_dem_path,
+        fwi_nc4_dir,
+        shape=(128, 128),
+        pkl_dirs={},
+        size_dict={},
+        tasks=['create_rasters', 'get_data', 'resize', 'normalize', 'make_csv']):
+    if 'create_rasters' in tasks:
+        # Create fire rasters
+        fire_rasters = ABoVE_shp_to_tif(above_shp_dir,
+                                        dataset_dir,
+                                        shape=shape,
+                                        pkl_dirs=pkl_dirs,
+                                        size_dict=size_dict)
+
+        with open('fire_rasters.pkl', 'wb') as f:
+            pickle.dump(fire_rasters, f)
+
+    if 'get_data' in tasks:
+        with open('fire_rasters.pkl', 'rb') as f:
+            fire_rasters = pickle.load(f)
+        # Get the data
+        get_data(dataset_dir,
+                 fire_rasters,
+                 master_fuelmap_path,
+                 master_dem_path,
+                 fwi_nc4_dir)
+
+    if 'resize' in tasks:
+        # Resize the dataset
+        _ = resize_dataset(dataset_dir, shape=shape)
+
+    if 'sanitize' in tasks:
+        # Check all required images exist
+        validate_dataset(dataset_dir, raise_error=True)
+
+        # Replace NaNs with 0
+        replace_dataset_nans(dataset_dir)
+
+    if 'normalize' in tasks:
+        # Get dataset normalization values
+        variable_stats = get_dataset_stats(dataset_dir)
+
+        # Normalize the dataset
+        normalize_dataset(dataset_dir, variable_stats, method='z-score')
+
+    if 'get_fire_stats' in tasks:
+        # Get fire spread stats
+        stats_csv = 'ABoVE_256_stats.csv'
+        fire_stats(dataset_dir, stats_csv)
+
+    if 'make_csv' in tasks:
+        # Make the dataset csv
+        stats_csv = 'ABoVE_256_stats.csv'
+        output_csv = 'above256_10per.csv'
+        make_csv(dataset_dir,
+                 stats_csv=stats_csv,
+                 output_csv=output_csv,
+                 growth_thresh=0.1,
+                 val_percentage=0.1,
+                 test_percentage=0.1,
+                 subset=None)
+
+    if 'plot' in tasks:
+        # Plot dataset hists
+        plot_dataset_histograms(dataset_dir)
+
+    print('\n Done! \n')
+
+
+if __name__ == '__main__':
+    os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data')
+    dataset_dir = 'ABoVE 256'
+    above_shp_dir = r'D:\!Research\01 - Python\Piyush\FirePred\Data\Wildfire\Wildfires_Date_of_Burning_1559\unzipped'
+    master_fuelmap_dir = r'G:\Shared drives\UofA Wildfire\Project\01 - Machine Learning\Piyush Project\Fuel Maps'
+    master_dem_path = r'G:\Shared drives\UofA Wildfire\Project\03 - Imagery\Canada MDEM\mrdem-30-dtm.tif'
+    fwi_nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ISI'
+    sz = 256
+
+    # all_fires, fire_areas = load_ABoVE_shp(above_shp_dir)
+
+    # with open('all_fires_above_2002_2018.pkl', 'wb') as f:
+    #     pickle.dump(all_fires, f)
+    # with open('fire_areas_above_2002_2018.pkl', 'wb') as f:
+    #     pickle.dump(fire_areas, f)
+
+    pkl_dirs = {'all_fires': 'all_fires_above_2002_2018.pkl',
+                'fire_areas': 'fire_areas_above_2002_2018.pkl'}
+
+    # with open(pkl_dirs['fire_areas'], 'rb') as f:
+    #     fire_areas = pickle.load(f)
+    # with open(pkl_dirs['all_fires'], 'rb') as f:
+    #     all_fires = pickle.load(f)
+    # quants = fire_extent_quantiles(all_fires)
+
+    quants = {'Q10': 49.94959039194655,
+              'Q25': 172.79736878257245,
+              'Q50': 575.3554684885603,
+              'Q75': 2875.4346012604947,
+              'Q90': 9285.051258987989}
+
+    size_dict = {'min': quants['Q10'],
+                 'max': quants['Q90']}
+
+    with open('fire_rasters.pkl', 'rb') as f:
+        fire_rasters = pickle.load(f)
+
+    processing_options = {
+        'create_rasters': {
+            'include': False,
+            'above_shp_dir': above_shp_dir,
+            'shape': (sz, sz),
+            'pkl_dirs': pkl_dirs,
+            'size_dict': size_dict,
+            'save_pkl': 'fire_rasters.pkl'
+        },
+        'get_data': {
+            'include': False,
+            'fire_rasters': fire_rasters,  # list
+            'master_fuelmap_dir': master_fuelmap_dir,  # str
+            'master_dem_path': master_dem_path,  # str
+            'fwi_nc4_dir': fwi_nc4_dir  # str
+        },
+        'resize': {
+            'include': False,
+            'shape': (sz, sz)
+        },
+        'sanitize': {
+            'include': False
+        },
+        'normalize': {
+            'include': False,
+            'method': None  # str
+        },
+        'get_fire_stats': {
+            'include': False,
+            'stats_csv': None  # str
+        },
+        'make_csv': {
+            'include': False,
+            'stats_csv': None,
+            'growth_thresh': 0.1,
+            'subset': None
+        },
+        'plot': {
+            'include': False
+        }
+    }
+
+    create_dataset(dataset_dir, processing_options)
