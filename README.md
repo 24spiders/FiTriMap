@@ -41,4 +41,8 @@ dataset_dir
 
 ## Installation
 
+FiTriMap can be installed by cloning this repository, navigating to the cloned directory, and calling 'python setup.py develop`.
+
+FiTriMap requires [`WeatherFetch`](https://github.com/24spiders/WeatherFetch)
+
 ## Usage
