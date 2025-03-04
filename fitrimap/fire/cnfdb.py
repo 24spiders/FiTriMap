@@ -15,7 +15,7 @@ import numpy as np
 
 def above_extent_quantiles(dataset_dir, quantiles=[0.25, 0.5, 0.75]):
     max_dims = []  # List to store the maximum dimensions (real-world area) of each fire raster
-    
+
     # Iterate through folders in the dataset directory
     for folder in os.listdir(dataset_dir):
         folder_path = os.path.join(dataset_dir, folder)
@@ -33,17 +33,17 @@ def above_extent_quantiles(dataset_dir, quantiles=[0.25, 0.5, 0.75]):
                     # Compute real-world area in map units (dimensions in map units)
                     x_dim = src.width * res_x
                     y_dim = src.height * res_y
-                    
+
                     # Get the maximum dimension (max area in map units)
                     max_dim = max(abs(x_dim), abs(y_dim))
                     max_dims.append(max_dim)
-    
+
     # Compute quantiles of the maximum dimensions
     quantile_values = np.percentile(max_dims, np.array(quantiles) * 100)
-    
+
     # Format the quantiles as 'Q10', 'Q50', 'Q75', etc.
     quantile_dict = {f'Q{int(q * 100)}': value for q, value in zip(quantiles, quantile_values)}
-    
+
     return quantile_dict
 
 
