@@ -18,50 +18,13 @@ import fitrimap
 from fitrimap.utils.geospatial_utils import crop_master_to_tif, resize_tif
 from fitrimap.fuels.recode_fuelmap import recode_fuelmap_RSI
 from fitrimap.topography.get_topo_indices import create_topo_indices
-from fitrimap.fire.shp_to_tif import ABoVE_shp_to_tif
+from fitrimap.fire.above_to_tif import ABoVE_shp_to_tif
 from fitrimap.dataset_creation.normalize import get_dataset_stats, normalize_dataset
 from fitrimap.dataset_creation.dataset_tools import plot_dataset_histograms, validate_dataset, replace_dataset_nans
-
-
-def create_hybrid_dataset():
-    # DELETE THIS LATER
-    os.chdir(r'D:\!Research\01 - Python\Piyush\CNN Fire Prediction\Raw Hybrid 128')
-    nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ISI'
-    for fire_id in os.listdir():
-        if os.path.isdir(fire_id):
-            print(fire_id)
-            # Get path to fuelmap
-            fid = fire_id.replace('_piyush', '')
-            output_path = os.path.join(fire_id, 'Indices', f'{fid}_RSI.tif')
-            if os.path.exists(output_path):
-                continue
-            fuelmap_path = os.path.join(fire_id, 'Cropped', f'{fire_id}_fuelmap.tif')
-
-            # Get year
-            year = int(fid[:4])
-
-            # Get avg DoY
-            krig_tif = os.path.join(fire_id, f'{fid}_krig.tif')
-            with rasterio.open(krig_tif) as src:
-                data = src.read()
-                # Get the average value in data excluding 0 and nan
-                mask = (data != 0) & (~np.isnan(data))
-
-                # Apply mask to filter out zeros and NaNs
-                filtered_data = data[mask]
-
-                # Calculate the average value of the filtered data
-                avg_value = filtered_data.mean() if filtered_data.size > 0 else np.nan  # Handle case if no valid data
-                try:
-                    doy = int(avg_value)
-                except:
-                    continue
-
-            recode_fuelmap_RSI(fuelmap_path, output_path, doy, year, nc4_dir)
+from fitrimap.fire.cnfdb import get_cnfdb, resize_cnfdb
 
 
 def get_data(dataset_dir,
-             fire_rasters,
              master_fuelmap_dir,
              master_dem_path,
              fwi_nc4_dir):
@@ -70,6 +33,17 @@ def get_data(dataset_dir,
 
     # Open the master dem (doing it here saves time)
     master_dem = rasterio.open(master_dem_path)
+
+    # Find all relevant tif files
+    fire_rasters = []  # List to store relative paths of matching files
+
+    # Walk through the directory and its subdirectories
+    for root, _, files in os.walk(dataset_dir):
+        for file in files:
+            # Check if the file ends with '_burn.tif'
+            if file.endswith('_burn.tif'):
+                pth = os.path.join(root, file)
+                fire_rasters.append(pth)  # Add to the list
 
     prev_year = None
     pbar = tqdm(total=len(fire_rasters), desc='Getting fuels, topography, and weather')
@@ -80,6 +54,7 @@ def get_data(dataset_dir,
         fire_dir = os.path.join(dataset_dir, fire_id)
         fuelmap_path = os.path.join(fire_dir, f'{fire_id}_fuelmap.tif')
         topo_path = os.path.join(fire_dir, f'{fire_id}_elevation.tif')
+        output_rsi = os.path.join(fire_dir, f'{fire_id}_RSI.tif')
 
         # Get year, open fuelmap raster
         year = int(fire_id[:4])
@@ -88,7 +63,7 @@ def get_data(dataset_dir,
             master_fuelmap = rasterio.open(master_fuelmap_path)
 
         # Check if data already exists; if so, skip
-        if os.path.exists(fuelmap_path) and os.path.exists(topo_path):
+        if os.path.exists(fuelmap_path) and os.path.exists(topo_path) and os.path.exists(output_rsi):
             pbar.update(1)
             continue
 
@@ -109,8 +84,7 @@ def get_data(dataset_dir,
 
         # Crop and recode fuel map
         crop_master_to_tif(master_fuelmap, fire_raster, fuelmap_path, buffer=0)
-        output_fuelmap = os.path.join(fire_dir, f'{fire_id}_RSI.tif')
-        recode_fuelmap_RSI(fuelmap_path, output_fuelmap, doy, year, fwi_nc4_dir)
+        recode_fuelmap_RSI(fuelmap_path, output_rsi, doy, year, fwi_nc4_dir)
 
         # Crop and calculate topography indices
         crop_master_to_tif(master_dem, fire_raster, topo_path, buffer=0)
@@ -290,13 +264,13 @@ def make_csv(dataset_dir, stats_csv, output_csv, growth_thresh=0, val_percentage
 
 def create_dataset(dataset_dir, processing_options):
     # TODO: Keep tidying inputs
-    if processing_options['create_rasters']['include']:
-        # Create fire rasters
-        above_shp_dir = processing_options['create_rasters']['above_shp_dir']
-        shape = processing_options['create_rasters']['shape']
-        pkl_dirs = processing_options['create_rasters']['pkl_dirs']
-        size_dict = processing_options['create_rasters']['size_dict']
-        save_pkl = processing_options['create_rasters']['save_pkl']
+    if processing_options['create_above_rasters']['include']:
+        # Create ABoVE rasters
+        above_shp_dir = processing_options['create_above_rasters']['above_shp_dir']
+        shape = processing_options['create_above_rasters']['shape']
+        pkl_dirs = processing_options['create_above_rasters']['pkl_dirs']
+        size_dict = processing_options['create_above_rasters']['size_dict']
+        save_pkl = processing_options['create_above_rasters']['save_pkl']
         fire_rasters = ABoVE_shp_to_tif(above_shp_dir,
                                         dataset_dir,
                                         shape=shape,
@@ -305,14 +279,21 @@ def create_dataset(dataset_dir, processing_options):
         with open(save_pkl, 'wb') as f:
             pickle.dump(fire_rasters, f)
 
+    if processing_options['get_cnfdb_rasters']['include']:
+        # Get CNFDB rasters
+        zip_dir = processing_options['get_cnfdb_rasters']['zip_dir']
+        bad_fires = processing_options['get_cnfdb_rasters']['bad_fires']
+        size_dict = processing_options['get_cnfdb_rasters']['size_dict']
+        target_shape = processing_options['get_cnfdb_rasters']['target_shape']
+        get_cnfdb(dataset_dir, zip_dir, bad_fires)
+        resize_cnfdb(dataset_dir, target_shape=target_shape, size_dict=size_dict)
+
     if processing_options['get_data']['include']:
         # Get the data
-        fire_rasters = processing_options['get_data']['fire_rasters']
         master_fuelmap_dir = processing_options['get_data']['master_fuelmap_dir']
         master_dem_path = processing_options['get_data']['master_dem_path']
         fwi_nc4_dir = processing_options['get_data']['fwi_nc4_dir']
         get_data(dataset_dir,
-                 fire_rasters,
                  master_fuelmap_dir,
                  master_dem_path,
                  fwi_nc4_dir)
@@ -363,84 +344,11 @@ def create_dataset(dataset_dir, processing_options):
     print('\n Done! \n')
 
 
-# %% TODO: Move this to a main
-def OLD(dataset_dir,
-        above_shp_dir,
-        master_fuelmap_path,
-        master_dem_path,
-        fwi_nc4_dir,
-        shape=(128, 128),
-        pkl_dirs={},
-        size_dict={},
-        tasks=['create_rasters', 'get_data', 'resize', 'normalize', 'make_csv']):
-    if 'create_rasters' in tasks:
-        # Create fire rasters
-        fire_rasters = ABoVE_shp_to_tif(above_shp_dir,
-                                        dataset_dir,
-                                        shape=shape,
-                                        pkl_dirs=pkl_dirs,
-                                        size_dict=size_dict)
-
-        with open('fire_rasters.pkl', 'wb') as f:
-            pickle.dump(fire_rasters, f)
-
-    if 'get_data' in tasks:
-        with open('fire_rasters.pkl', 'rb') as f:
-            fire_rasters = pickle.load(f)
-        # Get the data
-        get_data(dataset_dir,
-                 fire_rasters,
-                 master_fuelmap_path,
-                 master_dem_path,
-                 fwi_nc4_dir)
-
-    if 'resize' in tasks:
-        # Resize the dataset
-        _ = resize_dataset(dataset_dir, shape=shape)
-
-    if 'sanitize' in tasks:
-        # Check all required images exist
-        validate_dataset(dataset_dir, raise_error=True)
-
-        # Replace NaNs with 0
-        replace_dataset_nans(dataset_dir)
-
-    if 'normalize' in tasks:
-        # Get dataset normalization values
-        variable_stats = get_dataset_stats(dataset_dir)
-
-        # Normalize the dataset
-        normalize_dataset(dataset_dir, variable_stats, method='z-score')
-
-    if 'get_fire_stats' in tasks:
-        # Get fire spread stats
-        stats_csv = 'ABoVE_256_stats.csv'
-        fire_stats(dataset_dir, stats_csv)
-
-    if 'make_csv' in tasks:
-        # Make the dataset csv
-        stats_csv = 'ABoVE_256_stats.csv'
-        output_csv = 'above256_10per.csv'
-        make_csv(dataset_dir,
-                 stats_csv=stats_csv,
-                 output_csv=output_csv,
-                 growth_thresh=0.1,
-                 val_percentage=0.1,
-                 test_percentage=0.1,
-                 subset=None)
-
-    if 'plot' in tasks:
-        # Plot dataset hists
-        plot_dataset_histograms(dataset_dir)
-
-    print('\n Done! \n')
-
-
 if __name__ == '__main__':
     os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data')
-    dataset_dir = 'ABoVE 256'
+    dataset_dir = 'CNFDB 256'
     above_shp_dir = r'D:\!Research\01 - Python\Piyush\FirePred\Data\Wildfire\Wildfires_Date_of_Burning_1559\unzipped'
-    master_fuelmap_dir = r'G:\Shared drives\UofA Wildfire\Project\01 - Machine Learning\Piyush Project\Fuel Maps'
+    master_fuelmap_dir = r'G:\Shared drives\UofA Wildfire\Project\01 - Machine Learning\Daily Wildfire Prediction\Fuel Maps'
     master_dem_path = r'G:\Shared drives\UofA Wildfire\Project\03 - Imagery\Canada MDEM\mrdem-30-dtm.tif'
     fwi_nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ISI'
     sz = 256
@@ -461,30 +369,38 @@ if __name__ == '__main__':
     #     all_fires = pickle.load(f)
     # quants = fire_extent_quantiles(all_fires)
 
-    quants = {'Q10': 49.94959039194655,
-              'Q25': 172.79736878257245,
-              'Q50': 575.3554684885603,
-              'Q75': 2875.4346012604947,
-              'Q90': 9285.051258987989}
+    quants_above = {'Q10': 49.94959039194655,
+                    'Q25': 172.79736878257245,
+                    'Q50': 575.3554684885603,
+                    'Q75': 2875.4346012604947,
+                    'Q90': 9285.051258987989}
+    size_dict_above = {'min': quants_above['Q10'],
+                       'max': quants_above['Q90']}
 
-    size_dict = {'min': quants['Q10'],
-                 'max': quants['Q90']}
-
-    with open('fire_rasters.pkl', 'rb') as f:
-        fire_rasters = pickle.load(f)
+    quants_cnfdb = {'Q10': 6660.0, 'Q25': 8640.0, 'Q50': 12600.0, 'Q75': 19980.0, 'Q90': 32040.0}
+    size_dict_cnfdb = {'min': quants_cnfdb['Q10'],
+                       'max': quants_cnfdb['Q90']}
 
     processing_options = {
-        'create_rasters': {
+        'create_above_rasters': {
             'include': False,
             'above_shp_dir': above_shp_dir,
             'shape': (sz, sz),
             'pkl_dirs': pkl_dirs,
-            'size_dict': size_dict,
+            'size_dict': size_dict_above,
             'save_pkl': 'fire_rasters.pkl'
+        },
+        'get_cnfdb_rasters': {
+            'include': False,
+            'zip_dir': r'D:\!Research\01 - Python\Piyush\CNN Fire Prediction\Piyush Fire Dataset\Fire growth rasters',
+            'size_dict': size_dict_cnfdb,
+            'bad_fires': ['2002_375', '2002_389', '2002_640', '2003_64', '2003_362', '2003_393', '2003_412', '2003_586', '2003_602', '2003_633', '2004_546', '2005_2', '2005_7', '2006_366',
+                          '2006_671', '2007_96', '2009_339', '2009_397', '2011_317', '2012_248', '2012_250', '2012_545', '2012_745', '2012_851', '2013_288', '2013_567', '2013_805', '2015_155',
+                          '2015_1177', '2015_1693', '2016_174', '2017_1860', '2018_494', '2020_359', '2020_343'],
+            'target_shape': (sz, sz)
         },
         'get_data': {
             'include': False,
-            'fire_rasters': fire_rasters,  # list
             'master_fuelmap_dir': master_fuelmap_dir,  # str
             'master_dem_path': master_dem_path,  # str
             'fwi_nc4_dir': fwi_nc4_dir  # str
@@ -498,15 +414,16 @@ if __name__ == '__main__':
         },
         'normalize': {
             'include': False,
-            'method': None  # str
+            'method': 'minmax'  # str
         },
         'get_fire_stats': {
             'include': False,
-            'stats_csv': None  # str
+            'stats_csv': 'cnfdb_256_stats.csv'  # str
         },
         'make_csv': {
-            'include': False,
-            'stats_csv': None,
+            'include': True,
+            'output_csv': 'cnfdb_256_10per.csv',
+            'stats_csv': 'cnfdb_256_stats.csv',
             'growth_thresh': 0.1,
             'subset': None
         },

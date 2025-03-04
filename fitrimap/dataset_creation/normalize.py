@@ -5,12 +5,10 @@ Created on Fri Feb  7 15:04:07 2025
 @author: Labadmin
 """
 
-# min/max and z-score
 import os
 import numpy as np
 import rasterio
 from tqdm import tqdm
-import json
 
 
 def get_dataset_stats(dataset_dir):

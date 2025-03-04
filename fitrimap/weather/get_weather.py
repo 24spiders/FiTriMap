@@ -4,40 +4,20 @@ Created on Fri Feb 28 10:09:14 2025
 
 @author: Labadmin
 """
-from weatherfetch.array_ops import interpolate_in_bbox, ProcessingOptions
-from weatherfetch.point_ops import nearest_n_points
-from weatherfetch.earthaccess_fetch import url_download_merra2, build_url
-
 import os
 import rasterio
 from rasterio.warp import transform_bounds
 from rasterio.crs import CRS
 import numpy as np
-from datetime import datetime, timedelta
 from tqdm import tqdm
 import re
+from datetime import datetime
+from weatherfetch.array_ops import interpolate_in_bbox, ProcessingOptions
+from weatherfetch.point_ops import nearest_n_points
+from weatherfetch.earthaccess_fetch import url_download_merra2, build_url
 
-
-def doy_to_month_day(year, doy):
-    try:
-        # January 1 of the given year
-        start_date = datetime(int(year), 1, 1)
-
-        # Add the DOY to the start date, subtracting 1 to account for January 1
-        target_date = start_date + timedelta(days=doy - 1)
-
-        # Extract month and day
-        month = str(target_date.month)
-        day = str(target_date.day)
-
-        if len(month) == 1:
-            month = f'0{month}'
-        if len(day) == 1:
-            day = f'0{day}'
-
-        return month, day
-    except ValueError as e:
-        raise ValueError(f"Invalid input: {e}. Ensure DOY is within the valid range for the year.")
+import fitrimap
+from fitrimap.utils.date_utils import doy_to_month_day
 
 
 def get_weather_data(dataset_dir,
@@ -218,9 +198,9 @@ def interpolate_weather_data(dataset_dir,
 
 if __name__ == '__main__':
     # Get data
-    nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\M2I1NXASM NC4s'
+    nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\10m M2I1NXASM NC4s'
     weather_dataset = 'M2I1NXASM'
-    variables = ['U2M', 'V2M', 'T2M']
+    variables = ['U10M', 'V10M', 'T10M']
     dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ABoVE 256'
     get_weather_data(dataset_dir,
                      nc4_dir,
