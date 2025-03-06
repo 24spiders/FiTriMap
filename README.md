@@ -2,6 +2,9 @@
 
 FiTriMap is a Python package designed for acquiring and processing spatial 'wildfire triangle' data—fuel, topography, and weather—around wildfire perimeters.
 
+
+![image](https://github.com/user-attachments/assets/623652ed-7147-41d0-9038-e5099b6be7bd)
+
 ## Features
 
 FiTriMap automates the retrieval, processing, and standardization of wildfire-related spatial datasets. Specifically, it:
