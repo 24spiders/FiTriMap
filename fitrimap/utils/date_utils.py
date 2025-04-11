@@ -13,7 +13,7 @@ def doy_to_month_day(year, doy):
         start_date = datetime(int(year), 1, 1)
 
         # Add the DOY to the start date, subtracting 1 to account for January 1
-        target_date = start_date + timedelta(days=doy - 1)
+        target_date = start_date + timedelta(days=float(doy) - 1)
 
         # Extract month and day
         month = str(target_date.month)

@@ -14,6 +14,7 @@ import re
 from shapely.ops import unary_union
 import pickle
 from tqdm import tqdm
+import shutil
 
 from fitrimap.fire.fire_size import filter_fires_by_threshold
 
@@ -26,7 +27,8 @@ def load_ABoVE_shp(above_shp_dir):
             m = re.search(r'\d{4}', file)
             year = m.group(0)
             gdf = gpd.read_file(os.path.join(above_shp_dir, file))
-
+            # if int(year) > 2018:
+            #     continue
             # Group by UID_Fire
             for uid, group in gdf.groupby('UID_Fire'):
                 # We must exlcude Alaska as the fuel map only has data in Canada
@@ -73,6 +75,7 @@ def ABoVE_shp_to_tif(above_shp_dir,
     # Filter by area
     if size_dict:
         keys = filter_fires_by_threshold(all_fires, size_dict['min'], size_dict['max'], metric='max_extent')
+        pbar = tqdm(total=len(keys), desc='Filtering fires by size')
         # Remove fires from processing
         for key in keys:
             if verbose:
@@ -81,6 +84,8 @@ def ABoVE_shp_to_tif(above_shp_dir,
                 del fire_areas[key]
             if key in all_fires:
                 del all_fires[key]
+            pbar.update(1)
+        pbar.close()
 
     # Identify the fire with the largest extent in width or height
     max_width = 0
@@ -114,6 +119,12 @@ def ABoVE_shp_to_tif(above_shp_dir,
             continue
 
         os.makedirs(os.path.join(fire_raster_dir, fire_id), exist_ok=True)
+
+        # Skip the fire if it already exists
+        output_path = os.path.join(fire_raster_dir, fire_id, f'{fire_id}_burn.tif')
+        if os.path.exists(output_path):
+            pbar.update(1)
+            continue
 
         fire_gdf = fire_gdf.to_crs(epsg=3979)
 
@@ -178,9 +189,6 @@ def ABoVE_shp_to_tif(above_shp_dir,
         valid_data = raster[(raster != 0) & (~np.isnan(raster))]
         unique_doys = np.unique(valid_data)
         if len(unique_doys) > 0:
-
-            output_path = os.path.join(fire_raster_dir, fire_id, f'{fire_id}_burn.tif')
-
             with rasterio.open(
                 output_path,
                 'w',
@@ -195,7 +203,8 @@ def ABoVE_shp_to_tif(above_shp_dir,
                 dst.write(raster, 1)
             fire_rasters.append(output_path)
         else:
-            raise Exception(f'No unique DOYs in {fire_id}...')
+            print(f'No unique DOYs in {fire_id}...')
+            shutil.rmtree(os.path.join(fire_raster_dir, fire_id))
         pbar.update(1)
 
     pbar.close()

@@ -107,6 +107,7 @@ def interpolate_weather_data(dataset_dir,
                              resolution):
     # Perform interpolation for each variable
     for i, variable in enumerate(variables):
+        pbar = tqdm(total=len(os.listdir(dataset_dir)), desc=f'Interpolating {variable}')
         for fire_id in os.listdir(dataset_dir):
             fire_dir = os.path.join(dataset_dir, fire_id)
             if os.path.isdir(fire_dir):  # Check if it's a directory
@@ -156,7 +157,7 @@ def interpolate_weather_data(dataset_dir,
                         hour = None
                         avg_hours = avg_hours_per_var[i]
 
-                    elif variable in ['U2M', 'V2M', 'T2M']:
+                    elif variable in ['U10M', 'V10M', 'T10M']:
                         mode = 'avg_hourly'
                         hour = None
                         avg_hours = avg_hours_per_var[i]
@@ -186,7 +187,8 @@ def interpolate_weather_data(dataset_dir,
                                                     hour=hour,
                                                     avg_hours=avg_hours,
                                                     reproj=reproj,
-                                                    convert_h5=True)
+                                                    convert_h5=True,
+                                                    verbose=False)
                         # Run interpolation
                         interpolate_in_bbox(nc4_file_path,
                                             output_tif_path,
@@ -194,14 +196,17 @@ def interpolate_weather_data(dataset_dir,
                     else:
                         # Skip if file is already created
                         continue
+            pbar.update(1)
+        pbar.close()
 
 
 if __name__ == '__main__':
     # Get data
-    nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\10m M2I1NXASM NC4s'
+    nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\10m Humidity M2I1NXASM NC4s'
     weather_dataset = 'M2I1NXASM'
-    variables = ['U10M', 'V10M', 'T10M']
-    dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ABoVE 256'
+    # variables = ['U10M', 'V10M', 'T10M']
+    variables = ['QV10M', 'QV2M', 'PS', 'T2M', 'TS']
+    dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m'
     get_weather_data(dataset_dir,
                      nc4_dir,
                      weather_dataset,
@@ -209,8 +214,7 @@ if __name__ == '__main__':
                      n_pts=10)
 
     # # Interpolate data
-    # nc4_base_dir = r'D:\Users\Liam\Documents\01 - University\Research\Python\Piyush\NC4s\M2I1NXASM NC4s'
-    # variables = ['U2M', 'V2M', 'T2M']
+    # variables = ['T10M']
     # avg_hours_per_var = [6, 6, 24]
     # resolution = 100
     # n_pts = 10

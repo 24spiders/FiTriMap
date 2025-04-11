@@ -18,10 +18,11 @@ import fitrimap
 from fitrimap.utils.geospatial_utils import crop_master_to_tif, resize_tif
 from fitrimap.fuels.recode_fuelmap import recode_fuelmap_RSI
 from fitrimap.topography.get_topo_indices import create_topo_indices
-from fitrimap.fire.above_to_tif import ABoVE_shp_to_tif
+from fitrimap.fire.above_to_tif import ABoVE_shp_to_tif, load_ABoVE_shp
 from fitrimap.dataset_creation.normalize import get_dataset_stats, normalize_dataset
 from fitrimap.dataset_creation.dataset_tools import plot_dataset_histograms, validate_dataset, replace_dataset_nans
 from fitrimap.fire.cnfdb import get_cnfdb, resize_cnfdb
+from fitrimap.fire.fire_cleaning import remove_spot_fires, remove_unburnable
 
 
 def get_data(dataset_dir,
@@ -149,7 +150,7 @@ def fire_stats(dataset_dir, output_csv):
                     num_px = np.sum(raster_data == val)
 
                     # Area burning
-                    area = np.sum(raster_data == val) * pixel_area
+                    area = num_px * pixel_area
 
                     # New area burned as a percentage of previously burned area (can be > 1)
                     area_per = area / sum(areas)
@@ -310,6 +311,13 @@ def create_dataset(dataset_dir, processing_options):
         # Replace NaNs with 0
         replace_dataset_nans(dataset_dir)
 
+    if processing_options['cleaning']['include']:
+        # Remove unburnable fuels
+        remove_unburnable(dataset_dir)
+        
+        # Remove spot fires
+        remove_spot_fires(dataset_dir, min_px=6)
+
     if processing_options['normalize']['include']:
         # Get dataset normalization values
         method = processing_options['normalize']['method']
@@ -346,7 +354,7 @@ def create_dataset(dataset_dir, processing_options):
 
 if __name__ == '__main__':
     os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data')
-    dataset_dir = 'CNFDB 256'
+    dataset_dir = 'CNFDB 256 100m'
     above_shp_dir = r'D:\!Research\01 - Python\Piyush\FirePred\Data\Wildfire\Wildfires_Date_of_Burning_1559\unzipped'
     master_fuelmap_dir = r'G:\Shared drives\UofA Wildfire\Project\01 - Machine Learning\Daily Wildfire Prediction\Fuel Maps'
     master_dem_path = r'G:\Shared drives\UofA Wildfire\Project\03 - Imagery\Canada MDEM\mrdem-30-dtm.tif'
@@ -367,19 +375,19 @@ if __name__ == '__main__':
     #     fire_areas = pickle.load(f)
     # with open(pkl_dirs['all_fires'], 'rb') as f:
     #     all_fires = pickle.load(f)
-    # quants = fire_extent_quantiles(all_fires)
 
+    # Remember: these are extent quantiles (not area)
     quants_above = {'Q10': 49.94959039194655,
                     'Q25': 172.79736878257245,
                     'Q50': 575.3554684885603,
                     'Q75': 2875.4346012604947,
                     'Q90': 9285.051258987989}
     size_dict_above = {'min': quants_above['Q10'],
-                       'max': quants_above['Q90']}
+                       'max': quants_above['Q90'] + 16000}  # 114.20 m
 
     quants_cnfdb = {'Q10': 6660.0, 'Q25': 8640.0, 'Q50': 12600.0, 'Q75': 19980.0, 'Q90': 32040.0}
     size_dict_cnfdb = {'min': quants_cnfdb['Q10'],
-                       'max': quants_cnfdb['Q90']}
+                       'max': quants_cnfdb['Q90'] - 6000}
 
     processing_options = {
         'create_above_rasters': {
@@ -412,18 +420,21 @@ if __name__ == '__main__':
         'sanitize': {
             'include': False
         },
+        'cleaning': {
+            'include': False
+        },
         'normalize': {
             'include': False,
             'method': 'minmax'  # str
         },
         'get_fire_stats': {
             'include': False,
-            'stats_csv': 'cnfdb_256_stats.csv'  # str
+            'stats_csv': 'cnfdb_256_100m_nospot_stats.csv'  # str
         },
         'make_csv': {
-            'include': True,
-            'output_csv': 'cnfdb_256_10per.csv',
-            'stats_csv': 'cnfdb_256_stats.csv',
+            'include': False,
+            'output_csv': 'cnfdb_256_100m_nospot_10per.csv',
+            'stats_csv': 'cnfdb_256_100m_nospot_stats.csv',
             'growth_thresh': 0.1,
             'subset': None
         },
@@ -431,5 +442,8 @@ if __name__ == '__main__':
             'include': False
         }
     }
+
+    # Add: spot fire removal / hole filling
+    # Add: hybrid dataset creation
 
     create_dataset(dataset_dir, processing_options)

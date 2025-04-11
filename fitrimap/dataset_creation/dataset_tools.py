@@ -4,12 +4,20 @@ Created on Mon Feb 24 15:18:38 2025
 
 @author: Labadmin
 """
+# Defaults
+import datetime
 import os
 import shutil
+from collections import Counter
+
+# Spatial
 import geopandas as gpd
 from shapely import wkt
-from shapely.geometry import box
+from shapely.geometry import box, Polygon
 import rasterio
+from rasterio.features import shapes
+
+# Other
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -70,8 +78,102 @@ def find_actioned_fires(dataset_dir, actioned_csv, remove=False):
     return actioned_fire_ids
 
 
-def combine_ABoVE_CNFDB():
-    pass
+def find_matching_fires(priority_fires, proposed_fire_dir):
+    matched_fires = []
+
+    # Process proposed fire
+    _, prop_fire_id = os.path.split(proposed_fire_dir)
+    prop_fire_year = prop_fire_id.split('_')[0]
+    prop_fire_tif = os.path.join(proposed_fire_dir, f'{prop_fire_id}_burn.tif')
+    with rasterio.open(prop_fire_tif) as prop_src:
+        prop_transform = prop_src.transform
+        prop_data = prop_src.read(1)
+        prop_doys = prop_data[(prop_data != 0) & (~np.isnan(prop_data))]
+        prop_doys = np.unique(prop_doys)
+    prop_min_day = min(prop_doys) - 3
+    prop_max_day = max(prop_doys) + 3
+    prop_mask = (prop_data != 0) & ~np.isnan(prop_data)
+    prop_polygons = [Polygon(geom['coordinates'][0]) for geom, value in shapes(prop_data, mask=prop_mask, transform=prop_transform)]
+
+    # Check all priority fires
+    for priority_fire_dir in priority_fires:
+        if os.path.isdir(priority_fire_dir):
+            _, priority_fire_id = os.path.split(priority_fire_dir)
+            priority_fire_year = priority_fire_id.split('_')[0]
+
+            # If fires occured in different years, they do not match
+            if priority_fire_year != prop_fire_year:
+                continue
+
+            priority_fire_tif = os.path.join(priority_fire_dir, f'{priority_fire_id}_burn.tif')
+            with rasterio.open(priority_fire_tif) as priority_src:
+                priority_transform = priority_src.transform
+                priority_data = priority_src.read(1)
+                priority_doys = priority_data[(priority_data != 0) & (~np.isnan(priority_data))]
+                priority_doys = np.unique(priority_doys)
+
+            priority_min_day = min(priority_doys) - 3
+            priority_max_day = max(priority_doys) + 3
+
+            # If fires have very different DoY's, they do not match
+            if not (priority_max_day >= prop_min_day and prop_max_day >= priority_min_day):  # Intersection of DOY values
+                continue
+            # Finally, if fires have occurred around the same date, check for spatial overlap
+            priority_mask = (priority_data != 0) & ~np.isnan(priority_data)
+            priority_polygons = [Polygon(geom['coordinates'][0]) for geom, value in shapes(priority_data, mask=priority_mask, transform=priority_transform)]
+
+            for priority_poly in priority_polygons:
+                for prop_poly in prop_polygons:
+                    if priority_poly.intersects(prop_poly):
+                        matched_fires.append(priority_fire_dir)
+
+    return matched_fires
+
+
+def combine_ABoVE_CNFDB(above_dir, cnfdb_dir, hybrid_dir, priority='ABoVE'):
+    assert priority in ['ABoVE', 'CNFDB']
+    os.makedirs(hybrid_dir, exist_ok=True)
+    above_dirs = [os.path.join(above_dir, folder) for folder in os.listdir(above_dir)]
+    cnfdb_dirs = [os.path.join(cnfdb_dir, folder) for folder in os.listdir(cnfdb_dir)]
+
+    # Set dirs
+    if priority == 'ABoVE':
+        priority_dirs = above_dirs
+        suff = '_ABoVE'
+        other_dirs = cnfdb_dirs
+        other_suff = '_CNFDB'
+
+    elif priority == 'CNFDB':
+        priority_dirs = cnfdb_dirs
+        suff = '_CNFDB'
+        other_dirs = above_dirs
+        other_suff = '_ABoVE'
+
+    # Copy all priority fires
+    pbar = tqdm(total=len(priority_dirs), desc=f'Copying priority ({priority}) fires')
+    for fire_dir in priority_dirs:
+        if os.path.isdir(fire_dir):
+            _, fire_id = os.path.split(fire_dir)
+            dst = os.path.join(hybrid_dir, fire_id + suff)
+            if not os.path.exists(dst):
+                shutil.copytree(fire_dir, dst)
+        pbar.update(1)
+    pbar.close()
+
+    # Check other fires, only copy if they do not match an existing priority fire
+    pbar = tqdm(total=len(other_dirs), desc='Checking other fires')
+    for fire_dir in other_dirs:
+        if os.path.isdir(fire_dir):
+            _, fire_id = os.path.split(fire_dir)
+            dst = os.path.join(hybrid_dir, fire_id + other_suff)
+
+            # Check for matching fires
+            matched_fires = find_matching_fires(priority_dirs, fire_dir)
+
+            if not matched_fires:
+                shutil.copytree(fire_dir, dst)
+        pbar.update(1)
+    pbar.close()
 
 
 def replace_dataset_nans(dataset_dir):
@@ -198,7 +300,62 @@ def plot_dataset_histograms(dataset_dir):
     plt.show()
 
 
+def plot_date_distribution(dataset_dir):
+    fire_counts = Counter()
+
+    # Progress bar setup
+    pbar = tqdm(total=len(os.listdir(dataset_dir)), desc='Plotting dataset histograms')
+
+    for fire_id in os.listdir(dataset_dir):
+        fire_path = os.path.join(dataset_dir, fire_id)
+        if not os.path.isdir(fire_path):
+            continue
+
+        fid = '_'.join(fire_id.split('_')[:2])
+        year = int(fid[:4])  # Extract the year from fire_id
+        burn_tif = os.path.join(fire_path, f'{fid}_burn.tif')
+
+        # Read the burn date raster
+        with rasterio.open(burn_tif) as src:
+            burn_data = src.read(1)
+            burn_doys = burn_data[(burn_data != 0) & (~np.isnan(burn_data))]
+            burn_doys = np.unique(burn_doys)
+
+        if len(burn_doys) == 0:
+            continue
+
+        min_day = min(burn_doys)  # Earliest burn day-of-year
+
+        # Convert day-of-year to month
+        month = datetime.datetime(year, 1, 1) + datetime.timedelta(days=int(min_day) - 1)
+        fire_counts[(year, month.month)] += 1  # Store (year, month) count
+
+        pbar.update(1)
+
+    pbar.close()
+
+    # Prepare data for plotting
+    years, months = zip(*fire_counts.keys())
+    counts = list(fire_counts.values())
+
+    # Plot histogram
+    plt.figure(figsize=(10, 6))
+    plt.bar(range(len(counts)), counts, tick_label=[f'{y}-{m:02d}' for y, m in zip(years, months)], color='royalblue')
+    plt.xticks(rotation=45, ha='right')
+    plt.xlabel('Year-Month')
+    plt.ylabel('Number of Fires')
+    plt.title('Fire Occurrences by Month and Year')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
-    actioned_csv = r'G:\Shared drives\UofA Wildfire\Project\05 - GIS\NFDB\NFDB Point\actioned_fires.csv'
-    dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ABoVE 128'
-    validate_dataset(dataset_dir, raise_error=True)
+    # actioned_csv = r'G:\Shared drives\UofA Wildfire\Project\05 - GIS\NFDB\NFDB Point\actioned_fires.csv'
+    # dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ABoVE 128'
+    # validate_dataset(dataset_dir, raise_error=True)
+
+    above_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ABoVE 256 100m'
+    cnfdb_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m'
+    hybrid_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ABoVE Priority Hybrid 256 100m'
+    combine_ABoVE_CNFDB(above_dir, cnfdb_dir, hybrid_dir, priority='ABoVE')
