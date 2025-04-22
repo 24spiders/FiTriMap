@@ -28,7 +28,7 @@ from fitrimap.fire.fire_cleaning import remove_spot_fires, remove_unburnable
 def get_data(dataset_dir,
              master_fuelmap_dir,
              master_dem_path,
-             fwi_nc4_dir):
+             isi_nc4_dir):
     # Make the dataset directory
     os.makedirs(dataset_dir, exist_ok=True)
 
@@ -85,7 +85,7 @@ def get_data(dataset_dir,
 
         # Crop and recode fuel map
         crop_master_to_tif(master_fuelmap, fire_raster, fuelmap_path, buffer=0)
-        recode_fuelmap_RSI(fuelmap_path, output_rsi, doy, year, fwi_nc4_dir)
+        recode_fuelmap_RSI(fuelmap_path, output_rsi, doy, year, isi_nc4_dir)
 
         # Crop and calculate topography indices
         crop_master_to_tif(master_dem, fire_raster, topo_path, buffer=0)
@@ -293,11 +293,11 @@ def create_dataset(dataset_dir, processing_options):
         # Get the data
         master_fuelmap_dir = processing_options['get_data']['master_fuelmap_dir']
         master_dem_path = processing_options['get_data']['master_dem_path']
-        fwi_nc4_dir = processing_options['get_data']['fwi_nc4_dir']
+        isi_nc4_dir = processing_options['get_data']['isi_nc4_dir']
         get_data(dataset_dir,
                  master_fuelmap_dir,
                  master_dem_path,
-                 fwi_nc4_dir)
+                 isi_nc4_dir)
 
     if processing_options['resize']['include']:
         # Resize the dataset
@@ -358,7 +358,7 @@ if __name__ == '__main__':
     above_shp_dir = r'D:\!Research\01 - Python\Piyush\FirePred\Data\Wildfire\Wildfires_Date_of_Burning_1559\unzipped'
     master_fuelmap_dir = r'G:\Shared drives\UofA Wildfire\Project\01 - Machine Learning\Daily Wildfire Prediction\Fuel Maps'
     master_dem_path = r'G:\Shared drives\UofA Wildfire\Project\03 - Imagery\Canada MDEM\mrdem-30-dtm.tif'
-    fwi_nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ISI'
+    isi_nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\FWI_ISI'
     sz = 256
 
     # all_fires, fire_areas = load_ABoVE_shp(above_shp_dir)
@@ -411,7 +411,7 @@ if __name__ == '__main__':
             'include': False,
             'master_fuelmap_dir': master_fuelmap_dir,  # str
             'master_dem_path': master_dem_path,  # str
-            'fwi_nc4_dir': fwi_nc4_dir  # str
+            'isi_nc4_dir': isi_nc4_dir  # str
         },
         'resize': {
             'include': False,

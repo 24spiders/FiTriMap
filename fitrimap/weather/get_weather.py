@@ -22,6 +22,7 @@ from fitrimap.utils.date_utils import doy_to_month_day
 
 def get_weather_data(dataset_dir,
                      nc4_dir,
+                     weather_dest,
                      weather_dataset,
                      variables,
                      n_pts):
@@ -31,7 +32,7 @@ def get_weather_data(dataset_dir,
         fire_dir = os.path.join(dataset_dir, fire_id)
         if os.path.isdir(fire_dir):  # Check if it's a directory
             # Create folder to save unpacked weather
-            weather_dir = os.path.join(fire_dir, 'Weather')
+            weather_dir = os.path.join(weather_dest, fire_id, 'Weather')
             os.makedirs(weather_dir, exist_ok=True)
             # Get fire boundary tif
             fid = '_'.join(fire_id.split('_')[:2])
@@ -100,6 +101,7 @@ def get_weather_data(dataset_dir,
 
 def interpolate_weather_data(dataset_dir,
                              nc4_dir,
+                             weather_dest,
                              weather_dataset,
                              variables,
                              n_pts,
@@ -112,7 +114,7 @@ def interpolate_weather_data(dataset_dir,
             fire_dir = os.path.join(dataset_dir, fire_id)
             if os.path.isdir(fire_dir):  # Check if it's a directory
                 # Create folder to save the weather array
-                weather_dir = os.path.join(fire_dir, 'Weather Arr')
+                weather_dir = os.path.join(weather_dest, 'Weather Arr')
                 os.makedirs(weather_dir, exist_ok=True)
                 # Get fire boundary tif
                 fid = '_'.join(fire_id.split('_')[:2])
@@ -207,8 +209,10 @@ if __name__ == '__main__':
     # variables = ['U10M', 'V10M', 'T10M']
     variables = ['QV10M', 'QV2M', 'PS', 'T2M', 'TS']
     dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m'
+    weather_dest = r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m Weather'
     get_weather_data(dataset_dir,
                      nc4_dir,
+                     weather_dest,
                      weather_dataset,
                      variables,
                      n_pts=10)
@@ -220,6 +224,7 @@ if __name__ == '__main__':
     # n_pts = 10
     # interpolate_weather_data(dataset_dir,
     #                          nc4_dir,
+    #                          weather_dest,
     #                          weather_dataset,
     #                          variables,
     #                          n_pts,

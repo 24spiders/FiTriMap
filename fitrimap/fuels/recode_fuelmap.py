@@ -71,12 +71,12 @@ def get_abc(fuelmap):
     return a_arr, b_arr, c_arr
 
 
-def get_ISI(nc4_path, doy, year, point):
+def get_FWI(nc4_path, variable, doy, year, point):
     # Load the .nc file corresponding to the year
-    df = load_fwi_nc4(nc4_path, 'ISI', doy, year, verbose=False)
+    df = load_fwi_nc4(nc4_path, variable, doy, year, verbose=False)
     df = find_nearest_n_points(point[0], point[1], df, n_pts=4)
-    avg_ISI = df['ISI'].mean()
-    return avg_ISI
+    avg_indice = df[variable].mean()
+    return avg_indice
 
 
 def recode_fuelmap_RSI(fuelmap_path, output_path, doy, year, nc4_dir):
@@ -98,7 +98,7 @@ def recode_fuelmap_RSI(fuelmap_path, output_path, doy, year, nc4_dir):
 
     a_arr, b_arr, c_arr = get_abc(fuelmap)
     nc4_path = glob.glob(os.path.join(nc4_dir, f'*initial_spread_index*{year}*.nc'))[0]
-    ISI = get_ISI(nc4_path, doy, year, point)
+    ISI = get_FWI(nc4_path, 'ISI', doy, year, point)
     RSI = a_arr * (1 - np.exp(-b_arr * ISI))**(c_arr)
 
     # Update the profile
