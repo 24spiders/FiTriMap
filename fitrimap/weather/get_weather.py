@@ -16,6 +16,8 @@ from weatherfetch.array_ops import interpolate_in_bbox, ProcessingOptions
 from weatherfetch.point_ops import nearest_n_points
 from weatherfetch.earthaccess_fetch import url_download_merra2, build_url
 
+os.environ['PROJ_LIB'] = r'D:\Programs\Anaconda\envs\cds\Lib\site-packages\rasterio\proj_data'
+
 import fitrimap
 from fitrimap.utils.date_utils import doy_to_month_day
 
@@ -208,14 +210,16 @@ if __name__ == '__main__':
     weather_dataset = 'M2I1NXASM'
     # variables = ['U10M', 'V10M', 'T10M']
     variables = ['QV10M', 'QV2M', 'PS', 'T2M', 'TS']
-    dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m'
-    weather_dest = r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m Weather'
+
+    dataset_dir = r'D:\Users\Liam\Documents\01 - University\Research\01 - Python\Piyush\CNFDB 256 100m'
+    weather_dest = r'D:\Users\Liam\Documents\01 - University\Research\01 - Python\Piyush\CNFDB 100m Weather'
+
     get_weather_data(dataset_dir,
                      nc4_dir,
                      weather_dest,
                      weather_dataset,
                      variables,
-                     n_pts=10)
+                     n_pts=1)
 
     # # Interpolate data
     # variables = ['T10M']
