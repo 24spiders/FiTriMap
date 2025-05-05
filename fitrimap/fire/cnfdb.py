@@ -243,17 +243,19 @@ def resize_cnfdb(dataset_dir, target_shape, size_dict={}, target_crs='EPSG:3979'
 
 if __name__ == '__main__':
     os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data')
-    dataset_dir = 'CNFDB All 256 100m'
+    os.environ['PROJ_DATA'] = r'C:\Users\Labadmin\anaconda3\envs\weather\Lib\site-packages\pyproj\proj_dir\share\proj'
+    dataset_dir = 'CNFDB 256 100m NEW'
     zip_dir = r'D:\!Research\01 - Python\Piyush\CNN Fire Prediction\Piyush Fire Dataset\Fire growth rasters'
     bad_fires = ['2002_375', '2002_389', '2002_640', '2003_64', '2003_362', '2003_393', '2003_412', '2003_586', '2003_602', '2003_633', '2004_546', '2005_2', '2005_7', '2006_366',
                  '2006_671', '2007_96', '2009_339', '2009_397', '2011_317', '2012_248', '2012_250', '2012_545', '2012_745', '2012_851', '2013_288', '2013_567', '2013_805', '2015_155',
                  '2015_1177', '2015_1693', '2016_174', '2017_1860', '2018_494', '2020_359', '2020_343']
     # get_cnfdb(dataset_dir, zip_dir, bad_fires)
 
-    # quants = fire_extent_quantiles(dataset_dir, quantiles=[0.1, 0.25, 0.5, 0.75, 0.9])
-    # print(quants)
+    quants = fire_extent_quantiles(dataset_dir, quantiles=[0.1, 0.25, 0.5, 0.75, 0.9])
+    print(quants)
 
-    quants = {'Q10': 6660.0, 'Q25': 8640.0, 'Q50': 12600.0, 'Q75': 19980.0, 'Q90': 32040.0}
-    size_dict = {'min': quants['Q10'],
-                 'max': quants['Q90'] - 6000}
+    # quants = {'Q10': 6660.0, 'Q25': 8640.0, 'Q50': 12600.0, 'Q75': 19980.0, 'Q90': 32040.0}
+    # size_dict = {'min': quants['Q10'],
+    #              'max': quants['Q90'] - 6000}
+    size_dict = None
     resize_cnfdb(dataset_dir, target_shape=(256, 256), size_dict=size_dict)

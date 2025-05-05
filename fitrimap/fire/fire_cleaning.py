@@ -8,10 +8,12 @@ import os
 import numpy as np
 import rasterio
 from tqdm import tqdm
-from scipy.ndimage import label, binary_dilation
+from scipy.ndimage import label, binary_dilation, generate_binary_structure
 
 
 def remove_spot_fires(dataset_dir, min_px=10):
+    # Define an 8-connectivity structuring element (diagonal connections allowed)
+    structure = generate_binary_structure(2, 2)
     pbar = tqdm(total=len(os.listdir(dataset_dir)), desc='Removing spot fires')
     for folder in os.listdir(dataset_dir):
         fid = folder.replace('_CNFDB', '').replace('_ABoVE', '')
@@ -32,22 +34,30 @@ def remove_spot_fires(dataset_dir, min_px=10):
                 # Create a binary mask for the current DOY
                 doy_mask = (data == doy).astype(np.uint8)
 
-                # Remove areas that do not touch doy - 1
+                # Label connected regions
+                labeled_array, num_features = label(doy_mask, structure=structure)
+
+                # Remove small regions and update masks
+                for i in range(1, num_features + 1):
+                    region_mask = (labeled_array == i)
+                    if np.sum(region_mask) < min_px:
+                        out_data[region_mask] = 0
+                        doy_mask[region_mask] = 0  # Important: update DOY mask
+
                 prev_doy = doy - 1
                 if prev_doy in unique_doys:
-                    prev_mask = (data == prev_doy).astype(np.uint8)
-                    prev_mask_dilated = binary_dilation(prev_mask)  # Expand prev_doy mask to check adjacency
-                    labeled_array, num_features = label(doy_mask)
+                    # Prepare dilated mask of previous DOY
+                    prev_mask = (out_data == prev_doy).astype(np.uint8)
+                    prev_mask_dilated = binary_dilation(prev_mask, structure=structure)
 
+                    # Re-label after small region removal
+                    labeled_array, num_features = label(doy_mask, structure=structure)
+
+                    # Remove regions not touching previous DOY
                     for i in range(1, num_features + 1):
                         region_mask = (labeled_array == i)
-                        # Remove regions that do not touch prev_doy
                         if not np.any(prev_mask_dilated[region_mask]):
                             out_data[region_mask] = 0
-                        # Remove areas below min_px
-                        if np.sum(labeled_array == i) < min_px:
-                            # Remove small fire patches
-                            out_data[labeled_array == i] = 0
 
             # Save the modified raster
             no_spot = fire_tif.replace('_burn.tif', '_burn_nospot.tif')
@@ -96,5 +106,5 @@ def remove_unburnable(data_dir):
 
 
 if __name__ == '__main__':
-    dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\ABoVE Priority Hybrid 256 100m (old)'
+    dataset_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m NEW'
     remove_spot_fires(dataset_dir, min_px=6)

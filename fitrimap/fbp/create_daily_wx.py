@@ -34,11 +34,11 @@ def specific_to_relative_humidity(q, T, P):
     return RH
 
 
-def daily_wx(dataset_dir, FWI_nc_dir, fire_ids):
+def daily_wx(dataset_dir, weather_dir, FWI_nc_dir, fire_ids):
     for fire_id in fire_ids:
         df = pd.DataFrame(columns=['Daily', 'Min_Temp', 'Max_Temp', 'Min_RH', 'Min_WS', 'Max_WS', 'WD', 'Precip', 'FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI'])
         fid = '_'.join(fire_id.split('_')[:2])
-        weather_dir = os.path.join(dataset_dir, fire_id, 'Weather')
+        fire_weather_dir = os.path.join(weather_dir, fire_id, 'Weather')
         burn_tif = os.path.join(os.path.join(dataset_dir, fire_id, f'{fid}_burn.tif'))
 
         # Get unique values
@@ -59,13 +59,13 @@ def daily_wx(dataset_dir, FWI_nc_dir, fire_ids):
             daily = f'{day}/{month}/{year}'
 
             # Load temp data
-            temp_csv = os.path.join(weather_dir, f'{fid}_T10M_{value}.csv')
+            temp_csv = os.path.join(fire_weather_dir, f'{fid}_T10M_{value}.csv')
             temp_df = pd.read_csv(temp_csv)
             min_temp = temp_df['T10M'].min() - 273.15
             max_temp = temp_df['T10M'].max() - 273.15
 
             # Get relative humidity
-            spechum_csv = os.path.join(weather_dir, f'{fid}_QV10M_{value}.csv')
+            spechum_csv = os.path.join(fire_weather_dir, f'{fid}_QV10M_{value}.csv')  # Specific Humidty in kg/kg
             spechum_df = pd.read_csv(spechum_csv)
             q = spechum_df['QV10M'].min()
 
@@ -76,7 +76,7 @@ def daily_wx(dataset_dir, FWI_nc_dir, fire_ids):
             date = min_spechum_row['date']
             hour = min_spechum_row['hour']
 
-            press_csv = os.path.join(weather_dir, f'{fid}_PS_{value}.csv')
+            press_csv = os.path.join(fire_weather_dir, f'{fid}_PS_{value}.csv')  # Pressure in Pa
             press_df = pd.read_csv(press_csv)
 
             # Find the matching pressure value
@@ -105,15 +105,15 @@ def daily_wx(dataset_dir, FWI_nc_dir, fire_ids):
             min_rh = specific_to_relative_humidity(q, T, P)
 
             # Get precip
-            precip_csv = os.path.join(weather_dir, f'{fid}_PRECTOT_{value}.csv')
+            precip_csv = os.path.join(fire_weather_dir, f'{fid}_PRECTOT_{value}.csv')
             precip_df = pd.read_csv(precip_csv)
             precip = precip_df['PRECTOT'].to_numpy()
             precip = precip.sum()  # All precipitation that day [TODO: Filter to one unique point]
             precip = precip * 3600 * 24  # From kg/m2s to mm/hr to mm
 
             # Load wind data
-            u_csv = os.path.join(weather_dir, f'{fid}_U10M_{value}.csv')
-            v_csv = os.path.join(weather_dir, f'{fid}_V10M_{value}.csv')
+            u_csv = os.path.join(fire_weather_dir, f'{fid}_U10M_{value}.csv')
+            v_csv = os.path.join(fire_weather_dir, f'{fid}_V10M_{value}.csv')
             u_df = pd.read_csv(u_csv)
             v_df = pd.read_csv(v_csv)
             us = u_df['U10M'].to_numpy()
@@ -128,7 +128,7 @@ def daily_wx(dataset_dir, FWI_nc_dir, fire_ids):
             wd = math.degrees(math.atan2(u_at_max_ws, v_at_max_ws)) % 360  # atan2 is (y, x) but we swap to (x, y) to go clockwise
 
             # Get FWI
-            fwi_dict = get_fwi_indices(dataset_dir, fire_id, FWI_nc_dir, save_csv=True)
+            fwi_dict = get_fwi_indices(dataset_dir, fire_id, int(value), FWI_nc_dir, save_csv=True)
 
             # Create and append new row
             new_row = {'Daily': daily,

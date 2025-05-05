@@ -60,7 +60,7 @@ def get_data(dataset_dir,
         # Get year, open fuelmap raster
         year = int(fire_id[:4])
         if year != prev_year:
-            master_fuelmap_path = os.path.join(master_fuelmap_dir, f'3979_FBP-{year}-100m.tif')
+            master_fuelmap_path = os.path.join(master_fuelmap_dir, f'3979_FBP-{year-1}-100m.tif')
             master_fuelmap = rasterio.open(master_fuelmap_path)
 
         # Check if data already exists; if so, skip
@@ -353,12 +353,13 @@ def create_dataset(dataset_dir, processing_options):
 
 
 if __name__ == '__main__':
+    os.environ['PROJ_DATA'] = r'C:\Users\Labadmin\anaconda3\envs\weather\Lib\site-packages\pyproj\proj_dir\share\proj'
     os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data')
-    dataset_dir = 'CNFDB 256 100m'
+    dataset_dir = 'CNFDB 256 100m NEW'
     above_shp_dir = r'D:\!Research\01 - Python\Piyush\FirePred\Data\Wildfire\Wildfires_Date_of_Burning_1559\unzipped'
     master_fuelmap_dir = r'G:\Shared drives\UofA Wildfire\Project\01 - Machine Learning\Daily Wildfire Prediction\Fuel Maps'
     master_dem_path = r'G:\Shared drives\UofA Wildfire\Project\03 - Imagery\Canada MDEM\mrdem-30-dtm.tif'
-    isi_nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\FWI_ISI'
+    isi_nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\FWI\ISI'
     sz = 256
 
     # all_fires, fire_areas = load_ABoVE_shp(above_shp_dir)
@@ -399,7 +400,7 @@ if __name__ == '__main__':
             'save_pkl': 'fire_rasters.pkl'
         },
         'get_cnfdb_rasters': {
-            'include': False,
+            'include': True,
             'zip_dir': r'D:\!Research\01 - Python\Piyush\CNN Fire Prediction\Piyush Fire Dataset\Fire growth rasters',
             'size_dict': size_dict_cnfdb,
             'bad_fires': ['2002_375', '2002_389', '2002_640', '2003_64', '2003_362', '2003_393', '2003_412', '2003_586', '2003_602', '2003_633', '2004_546', '2005_2', '2005_7', '2006_366',
@@ -408,20 +409,20 @@ if __name__ == '__main__':
             'target_shape': (sz, sz)
         },
         'get_data': {
-            'include': False,
+            'include': True,
             'master_fuelmap_dir': master_fuelmap_dir,  # str
             'master_dem_path': master_dem_path,  # str
             'isi_nc4_dir': isi_nc4_dir  # str
         },
         'resize': {
-            'include': False,
+            'include': True,
             'shape': (sz, sz)
         },
         'sanitize': {
-            'include': False
+            'include': True
         },
         'cleaning': {
-            'include': False
+            'include': True
         },
         'normalize': {
             'include': False,

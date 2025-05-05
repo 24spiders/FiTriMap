@@ -16,6 +16,7 @@ from fitrimap.utils.geospatial_utils import get_tif_bounds, transform_bounds
 
 def get_fwi_indices(dataset_dir,
                     fire_id,
+                    doy,
                     FWI_nc_dir,
                     save_csv=False):
     # Init dataframe and fire_dir
@@ -27,22 +28,6 @@ def get_fwi_indices(dataset_dir,
         fid = '_'.join(fire_id.split('_')[:2])
         year = int(fid[:4])
         burn_tif = os.path.join(fire_dir, f'{fid}_burn.tif')
-
-        # Get DOY
-        with rasterio.open(burn_tif) as src:
-            data = src.read()
-            # Get the average value in data excluding 0 and nan
-            mask = (data != 0) & (~np.isnan(data))
-
-            # Apply mask to filter out zeros and NaNs
-            filtered_data = data[mask]
-
-            # Get first day
-            min_value = np.min(filtered_data) if filtered_data.size > 0 else np.nan  # Handle case if no valid data
-
-            # Get dates
-            # TODO: Technically, we need a new fuelmap for each day
-            doy = int(min_value)
 
         # Get point
         bound_dict = get_tif_bounds(burn_tif)
@@ -89,7 +74,7 @@ def get_fwi_indices(dataset_dir,
         row = {'Fire ID': fire_id, 'Year': year, 'DOY': doy, 'Latitude': lat, 'Longitude': lon, 'Index': 'ISI', 'Value': isi}
         df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
 
-        df.to_csv(os.path.join(fire_dir, 'fwi.csv'))
+        df.to_csv(os.path.join(fire_dir, f'fwi_{doy}.csv'))
 
         index_dict = {'BUI': bui,
                       'DC': dc,
