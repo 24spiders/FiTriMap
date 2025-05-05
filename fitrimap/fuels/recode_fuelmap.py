@@ -13,6 +13,15 @@ from fitrimap.utils.geospatial_utils import get_tif_bounds, transform_bounds
 
 
 def get_abc(fuelmap):
+    """Gets 'a', 'b', and 'c' values - coefficients used by Prometheus to calculate RSI.
+
+    Args:
+        fuelmap (np.array): Numpy array where cell values = FBP fuel type codes.
+
+    Returns:
+        a_arr, b_arr, c_arr (np.array): Numpy arrays of Prometheus RSI coefficients.
+    """
+    # Initialize arrays
     a_arr = np.zeros(fuelmap.shape)
     b_arr = np.zeros(fuelmap.shape)
     c_arr = np.zeros(fuelmap.shape)
@@ -71,20 +80,39 @@ def get_abc(fuelmap):
     return a_arr, b_arr, c_arr
 
 
-def get_FWI(nc4_path, variable, doy, year, point):
+def get_FWI(nc_path, variable, doy, year, point):
+    """Gets Fire Weather Index values from NC files from 'Global Fire Weather Indices' - https://zenodo.org/records/3626193
+
+    Args:
+        nc_path (str): Path to the netCDF file.
+        variable (str): Index to extract (e.g., 'FFMC').
+        doy (int): Day of year to get variable data for.
+        year (int): Year to get variable data for.
+        point (tuple): (lat, lon) in EPSG:4326 of the point of interest.
+
+    Returns:
+        avg_index (float): Mean value of the 4 nearest points to 'point' of 'variable'.
+    """
     # Load the .nc file corresponding to the year
-    df = load_fwi_nc4(nc4_path, variable, doy, year, verbose=False)
+    df = load_fwi_nc4(nc_path, variable, doy, year, verbose=False)
     df = find_nearest_n_points(point[0], point[1], df, n_pts=4)
-    avg_indice = df[variable].mean()
-    return avg_indice
+    avg_index = df[variable].mean()
+    return avg_index
 
 
-def recode_fuelmap_RSI(fuelmap_path, output_path, doy, year, nc4_dir):
-    '''
-    Uses FFMC maps to recode the fuelmaps.
-    FFMC maps can be found here https://zenodo.org/records/3540950
-    Equations from 'Development and Structure of the Canadian FBP system'
-    '''
+def recode_fuelmap_RSI(fuelmap_path, output_path, doy, year, nc_dir):
+    """Uses ISI maps to recode the fuelmaps. ISI maps can be found here https://zenodo.org/records/3540950. Equations from 'Development and Structure of the Canadian FBP system'
+
+    Args:
+        fuelmap_path (str): Path to the fuelmap to recode.
+        output_path (str): Path to save the recoded fuelmap.
+        doy (int): Day of year to get variable data for.
+        year (int): Year to get variable data for.
+        nc_dir (str): Path to folder containing ISI netCDF files.
+
+    Returns:
+        RSI (np.array): Numpy array with same shape as 'fuelmap' containing RSI values. Also saves RSI array as GeoTIFF.
+    """
     with rasterio.open(fuelmap_path) as src:
         fuelmap = src.read(1)
         profile = src.profile
@@ -97,7 +125,7 @@ def recode_fuelmap_RSI(fuelmap_path, output_path, doy, year, nc4_dir):
     point = (lat, lon)
 
     a_arr, b_arr, c_arr = get_abc(fuelmap)
-    nc4_path = glob.glob(os.path.join(nc4_dir, f'*initial_spread_index*{year}*.nc'))[0]
+    nc4_path = glob.glob(os.path.join(nc_dir, f'*initial_spread_index*{year}*.nc'))[0]
     ISI = get_FWI(nc4_path, 'ISI', doy, year, point)
     RSI = a_arr * (1 - np.exp(-b_arr * ISI))**(c_arr)
 

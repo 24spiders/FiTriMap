@@ -11,11 +11,27 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 
-def load_fwi_nc4(nc4_file_path, variable, doy, year, verbose=True):
+def load_fwi_nc4(nc_file_path, variable, doy, year, verbose=True):
+    """Loads data from netCDF files from 'Global Fire Weather Indices' - https://zenodo.org/records/3626193
+
+    Args:
+        nc_file_path (str): Path to the netCDF file.
+        variable (str): Name of the variable to load from the netCDF file.
+        doy (int): Day of year to get variable data for.
+        year (int): Year to get variable data for.
+        verbose (bool, optional): If True, prints additional information. Defaults to True.
+
+    Raises:
+        ValueError: Raised when passed variable is not found in netCDF file.
+        ValueError: Rasied when passed date (year, doy) is not found in netCDF file.
+
+    Returns:
+        df (Pandas DataFrame): DataFrame containing the loaded data. Has columns [Latitude, Longitude, Date, Variable].
+    """
     # Open the NetCDF file
-    dataset = nc.Dataset(nc4_file_path, 'r')
+    dataset = nc.Dataset(nc_file_path, 'r')
     if verbose:
-        print(f'NC4 Keys: {dataset.variables.keys()}')
+        print(f'netCDF Keys: {dataset.variables.keys()}')
 
     # Get the variable data
     if variable not in dataset.variables:
@@ -42,7 +58,7 @@ def load_fwi_nc4(nc4_file_path, variable, doy, year, verbose=True):
     # Filter data where DoY matches input DoY
     filtered_data_idx = (time_data == doy)
     if not np.any(filtered_data_idx):
-        raise ValueError(f'No data found for DoY {doy} in the NC4 file.')
+        raise ValueError(f'No data found for DoY {doy} in the netCDF file.')
 
     # Apply the filter based on the DoY index
     filtered_var_data = var_data[filtered_data_idx]
@@ -71,7 +87,7 @@ def load_fwi_nc4(nc4_file_path, variable, doy, year, verbose=True):
 
 
 def find_nearest_n_points(lat, lon, df, n_pts):
-    """ From WeatherFetch
+    """From WeatherFetch
     Filters a DataFrame to the nearest 'n_pts' points to a given (lat, lon) based on latitude and longitude.
 
     Args:
@@ -114,10 +130,3 @@ def find_nearest_n_points(lat, lon, df, n_pts):
     filtered_df = filtered_df.drop(columns=['distance'])
 
     return filtered_df
-
-
-if __name__ == '__main__':
-    import os
-    os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data\FFMC')
-    df = load_fwi_nc4('no_overwintering_fine_fuel_moisture_code_2002.nc', variable='FFMC', doy=100, year=2002)
-    filtered_df = find_nearest_n_points(50.5, 140, df, n_pts=2)

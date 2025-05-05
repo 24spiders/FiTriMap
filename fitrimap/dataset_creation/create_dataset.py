@@ -89,7 +89,7 @@ def get_data(dataset_dir,
 
         # Crop and calculate topography indices
         crop_master_to_tif(master_dem, fire_raster, topo_path, buffer=0)
-        create_topo_indices(topo_path, fire_dir)
+        create_topo_indices(topo_path, fire_id)
 
         # TODO: get weather
         pbar.update(1)

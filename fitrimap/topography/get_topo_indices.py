@@ -8,15 +8,21 @@ import os
 from osgeo import gdal
 
 
-def create_topo_indices(dem_file, output_dir):
-    _, fire_id = os.path.split(output_dir)
+def create_topo_indices(dem_file, fire_id):
+    """Creates accompanying slope and aspect TIFs from a DEM.
+
+    Args:
+        dem_file (str): Path to the DEM file.
+        output_dir (str): Location to save slope and aspect TIFs.
+    """
+    dem_dir, _ = os.path.split(dem_file)
     fid = '_'.join(fire_id.split('_')[:2])
     # Compute slope
-    slope_path = os.path.join(output_dir, f'{fid}_slope.tif')
+    slope_path = os.path.join(dem_dir, f'{fid}_slope.tif')
     if not os.path.isfile(slope_path):
         gdal.DEMProcessing(slope_path, dem_file, 'slope')
 
     # Compute aspect
-    aspect_path = os.path.join(output_dir, f'{fid}_aspect.tif')
+    aspect_path = os.path.join(dem_dir, f'{fid}_aspect.tif')
     if not os.path.isfile(aspect_path):
         gdal.DEMProcessing(aspect_path, dem_file, 'aspect')

@@ -5,9 +5,10 @@ Created on Fri Feb  7 11:08:21 2025
 @author: Labadmin
 """
 
-import fitrimap.dataset_creation
-import fitrimap.fire
-import fitrimap.fuels
-import fitrimap.topography
-import fitrimap.utils
-import fitrimap.weather
+from . import dataset_creation
+from . import fbp
+from . import fire
+from . import fuels
+from . import topography
+from . import utils
+from . import weather

@@ -14,6 +14,14 @@ import numpy as np
 
 
 def get_tif_bounds(tif_file):
+    """Gets the bounds and EPSG code of a TIF file.
+
+    Args:
+        tif_file (str): Path to the TIF file.
+
+    Returns:
+        bound_dict (dict): Dictionary containing 'bounds' (xmin, ymin, xmax, ymax) and 'epsg' (epsg code).
+    """
     with rasterio.open(tif_file) as src:
         # Get bounds
         bounds = src.bounds
@@ -25,6 +33,14 @@ def get_tif_bounds(tif_file):
 
 
 def get_shp_bounds(shp_file):
+    """Gets the bounds and EPSG code of a shp file.
+
+    Args:
+        shp_file (str): Path to the SHP file.
+
+    Returns:
+        bound_dict (dict): Dictionary containing 'bounds' (xmin, ymin, xmax, ymax) and 'epsg' (epsg code).
+    """
     # Read the shapefile using geopandas
     gdf = gpd.read_file(shp_file)
 
@@ -33,11 +49,20 @@ def get_shp_bounds(shp_file):
 
     # Get the EPSG code from the CRS
     epsg_code = gdf.crs.to_epsg() if gdf.crs else None
-
-    return {'bounds': bounds, 'epsg': epsg_code}
+    bound_dict = {'bounds': bounds, 'epsg': epsg_code}
+    return bound_dict
 
 
 def transform_bounds(bound_dict, output_epsg):
+    """Transforms bounds to a different projection
+
+    Args:
+        bound_dict (dict): Dictionary containing 'bounds' (xmin, ymin, xmax, ymax) and 'epsg' (epsg code). Likely returned from either get_tif_bounds() or get_shp_bounds().
+        output_epsg (int): Output EPSG code to project bounds to.
+
+    Returns:
+        new_bounds (list): [xmin, ymin, xmax, ymax] in the output_epsg coordinate system.
+    """
     # Get bound params
     bounds = bound_dict['bounds']
     input_epsg = bound_dict['epsg']
@@ -47,24 +72,46 @@ def transform_bounds(bound_dict, output_epsg):
     # Transform coordinates
     xmin, ymin = transformer.transform(bounds[0], bounds[1])
     xmax, ymax = transformer.transform(bounds[2], bounds[3])
+    new_bounds = [xmin, ymin, xmax, ymax]
+    return new_bounds
 
-    return [xmin, ymin, xmax, ymax]
 
+def crop_master_to_tif(master_tif, crop_to_tif, output_path, buffer_distance=0):
+    """Crops a large 'master' tif to the bounds of a smaller tif.
 
-def crop_master_to_tif(master_tif, crop_to_tif, output_path, buffer=0):
+    Args:
+        master_tif (str): Path to the master tif.
+        crop_to_tif (str): Path to the smaller tif (master_tif will be cropped to its bounds)
+        output_path (str): Path to save the cropped master_tif
+        buffer_distance (int, optional): Distance that crop_to_tif bounds will be buffered. Defaults to 0.
+
+    Returns:
+        output_path (str): Path where the cropped master_tif was save.
+    """
     # Get the boundary of the tif you are cropping to
     bound_dict = get_tif_bounds(crop_to_tif)
     # Crop
-    crop_tif_to_bounds(master_tif, bound_dict, output_path, buffer)
+    crop_tif_to_bounds(master_tif, bound_dict, output_path, buffer_distance)
     return output_path
 
 
-def crop_master_to_shp(master_path, crop_to_shp, output_path, buffer=0):
+def crop_master_to_shp(master_path, crop_to_shp, output_path, buffer_distance=0):
+    """Crops a large 'master' tif to the bounds of a shapefile.
+
+    Args:
+        master_tif (str): Path to the master tif.
+        crop_to_shp (str): Path to the shapefile (master_tif will be cropped to its bounds)
+        output_path (str): Path to save the cropped master_tif
+        buffer_distance (int, optional): Distance that crop_to_tif bounds will be buffered. Defaults to 0.
+
+    Returns:
+        output_path (str): Path where the cropped master_tif was save.
+    """
     print(f'Cropping {master_path} to {crop_to_shp}...')
     # Get the total boundary of the shp you are cropping to
     bound_dict = get_shp_bounds(crop_to_shp)
     # Crop fuelmap
-    crop_tif_to_bounds(master_path, bound_dict, output_path, buffer)
+    crop_tif_to_bounds(master_path, bound_dict, output_path, buffer_distance)
     return output_path
 
 
@@ -72,6 +119,14 @@ def crop_tif_to_bounds(master_tif,
                        bound_dict,
                        output_path,
                        buffer_distance=0):
+    """Crops a 'master' tif to passed bounds.
+
+    Args:
+        master_tif (str): Path to the master tif.
+        bound_dict (dict): Dictionary containing 'bounds' (xmin, ymin, xmax, ymax) and 'epsg' (epsg code). Likely returned from either get_tif_bounds() or get_shp_bounds().
+        output_path (str): Path to save the cropped master_tif
+        buffer_distance (int, optional): Distance that crop_to_tif bounds will be buffered. Defaults to 0.
+    """
     # TODO: This could be perfected to ensure pixel alignment (ie, resample fuel maps)
     # Get bound params
     bounds = bound_dict['bounds']
@@ -108,7 +163,19 @@ def crop_tif_to_bounds(master_tif,
         dest.write(out_image)
 
 
-def resize_tif(tif_file, shape, resampling_method):
+def resize_tif(tif_file, shape, resampling_method, output_path=None):
+    """Resizes a tif to a new shape. Updates the tifs projection to ensure it keeps the same spatial bounds.
+    OVERWRITES tif_file unless output_path is passed.
+
+    Args:
+        tif_file (str): Path to the tif file to resize.
+        shape (tuple of ints): (target_width, target_height) in pixels.
+        resampling_method (str): Method of rasterio.enums.Resampling.
+        output_path (str): Path to save the resized_tif. If not passed, tif_file is overwritten. Defaults to None.
+
+    Returns:
+        output_path (str): Path to the resized tif_file.
+    """
     assert tif_file.endswith('.tif')
     target_width, target_height = shape[0], shape[1]
 
@@ -143,9 +210,11 @@ def resize_tif(tif_file, shape, resampling_method):
         })
 
     # Write the resized image to disk
-    with rasterio.open(tif_file, 'w', **output_meta) as dst:
+    if not output_path:
+        output_path = tif_file
+    with rasterio.open(output_path, 'w', **output_meta) as dst:
         # Write each channel individually
         for i in range(resampled_channels.shape[0]):
             dst.write(resampled_channels[i], i + 1)  # Write each channel
 
-    return tif_file
+    return output_path

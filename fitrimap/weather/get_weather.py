@@ -16,9 +16,6 @@ from weatherfetch.array_ops import interpolate_in_bbox, ProcessingOptions
 from weatherfetch.point_ops import nearest_n_points
 from weatherfetch.earthaccess_fetch import url_download_merra2, build_url
 
-os.environ['PROJ_LIB'] = r'D:\Programs\Anaconda\envs\cds\Lib\site-packages\rasterio\proj_data'
-
-import fitrimap
 from fitrimap.utils.date_utils import doy_to_month_day
 
 
@@ -28,6 +25,16 @@ def get_weather_data(dataset_dir,
                      weather_dataset,
                      variables,
                      n_pts):
+    """Uses WeatherFetch to get weather data around each wildfire in a dataset. Specifically, downloads MERRA-2 data and unpacks nc files into weather csvs.
+
+    Args:
+        dataset_dir (str): Path to the dataset folder (containing a folder for each fire).
+        nc4_dir (str): Path to a folder to save downloaded nc files.
+        weather_dest (str): Path to save the unpacked weather csvs.
+        weather_dataset (str): Weather dataset identifier.
+        variables (list): List of variables to download and extract from the MERRA-2 weather_dataset.
+        n_pts (int): Number of points nearest to the center of each fire to unpack into weather csvs.
+    """
     # Iterate over each directory in the base directory
     pbar = tqdm(total=len(os.listdir(dataset_dir)), desc=f'Downloading {weather_dataset} data')
     for fire_id in os.listdir(dataset_dir):
@@ -109,6 +116,18 @@ def interpolate_weather_data(dataset_dir,
                              n_pts,
                              avg_hours_per_var,
                              resolution):
+    """Interpolates weather data into a 2D numpy array, saves arrays as h5 files.
+
+    Args:
+        dataset_dir (str): Path to the dataset folder (containing a folder for each fire).
+        nc4_dir (str): Path to a folder to containing the downloaded nc files.
+        weather_dest (str): Path to save the interpolated numpy arrays.
+        weather_dataset (str): Weather dataset identifier.
+        variables (list): List of variables to download and extract from the MERRA-2 weather_dataset.
+        n_pts (int): Number of points nearest to the center of each fire to use.
+        avg_hours_per_var (int): Number of hours to average over for each variable.
+        resolution (float): Spatial resolution of the output file (in metres).
+    """
     # Perform interpolation for each variable
     for i, variable in enumerate(variables):
         pbar = tqdm(total=len(os.listdir(dataset_dir)), desc=f'Interpolating {variable}')
@@ -205,6 +224,7 @@ def interpolate_weather_data(dataset_dir,
 
 
 if __name__ == '__main__':
+    os.environ['PROJ_LIB'] = r'D:\Programs\Anaconda\envs\cds\Lib\site-packages\rasterio\proj_data'
     # Get data
     nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\10m Humidity M2I1NXASM NC4s'
     weather_dataset = 'M2I1NXASM'
