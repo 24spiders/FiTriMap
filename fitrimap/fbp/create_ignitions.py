@@ -15,7 +15,7 @@ import fitrimap
 from fitrimap.utils.date_utils import doy_to_month_day
 
 
-def mask_to_polygons(data, mask, transform, value):
+def mask_to_polygons(data, mask, transform, value, simplify_tolerance=100):
     # Generate polygons using rasterio.features.shapes (preserves topology)
     shapes_gen = rasterio.features.shapes(data, mask=mask, transform=transform)
 
@@ -24,7 +24,7 @@ def mask_to_polygons(data, mask, transform, value):
     for geom, val in shapes_gen:
         if val == value:
             # Convert geojson geometry to shapely geometry
-            poly = shape(geom)
+            poly = shape(geom).simplify(tolerance=simplify_tolerance, preserve_topology=True)
             polygons.append(poly)
 
     # Skip if no valid geometry
@@ -34,7 +34,7 @@ def mask_to_polygons(data, mask, transform, value):
         return polygons
 
 
-def create_ignition_kmls(burn_tif):
+def create_ignitions(burn_tif):
     h, t = os.path.split(burn_tif)
     os.makedirs(os.path.join(h, 'Ignitions'), exist_ok=True)
     # Load data from raster
@@ -69,10 +69,6 @@ def create_ignition_kmls(burn_tif):
         gdf.to_file(os.path.join(h, 'Ignitions', out_shp), driver='ESRI Shapefile')
 
 
-def get_ignitions(dataset_dir):
-    pass
-
-
 if __name__ == '__main__':
     os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data\CNFDB 256 100m\2002_109')
-    create_ignition_kmls('2002_109_burn_nospot.tif')
+    create_ignitions('2002_109_burn_nospot.tif')

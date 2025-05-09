@@ -5,10 +5,14 @@ Created on Fri Feb  7 11:08:05 2025
 @author: Labadmin
 """
 import rasterio
+import os
 from pyproj import Transformer
 from rasterio.mask import mask
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.crs import CRS
 from shapely.geometry import box, mapping
 from shapely.ops import transform
+from pyproj import Transformer
 import geopandas as gpd
 import numpy as np
 
@@ -218,3 +222,115 @@ def resize_tif(tif_file, shape, resampling_method, output_path=None):
             dst.write(resampled_channels[i], i + 1)  # Write each channel
 
     return output_path
+
+
+def reproject_to_nearest_utm(input_raster_path, output_raster_path=None):
+    """
+    Reprojects a raster to the nearest UTM coordinate system based on its centroid.
+    Works regardless of input CRS (e.g., EPSG:3979).
+    Args:
+        input_raster_path (str): Path to the input raster file
+        output_raster_path (str): Optional path to save the reprojected raster. If None, overwrites it.
+    Returns:
+        output_raster_path (str): Path to the reprojected raster file
+    """
+    # Open the input raster
+    with rasterio.open(input_raster_path) as src:
+        # Get raster attributes
+        src_count = src.count
+        src_transform = src.transform
+        src_crs = src.crs
+        data = src.read()
+
+        # Compute the centroid in the source CRS
+        bounds = src.bounds
+        x_center = (bounds.left + bounds.right) / 2
+        y_center = (bounds.top + bounds.bottom) / 2
+
+        # Transform centroid to lat/lon (EPSG:4326)
+        transformer = Transformer.from_crs(src.crs, 'EPSG:4326', always_xy=True)
+        lon, lat = transformer.transform(x_center, y_center)
+
+        # Determine UTM zone
+        utm_zone = int((lon + 180) / 6) + 1
+
+        # Use NAD83 if in typical North American range, otherwise WGS84
+        if -142 <= lon <= -52 and 40 <= lat <= 85:  # Conservative NAD83 bounds
+            target_epsg = 26900 + utm_zone  # NAD83 / UTM zone
+        elif lat >= 0:
+            target_epsg = 32600 + utm_zone  # WGS84 / UTM north
+        else:
+            target_epsg = 32700 + utm_zone  # WGS84 / UTM south
+
+        target_crs = CRS.from_epsg(target_epsg)
+
+        # Calculate transform and metadata for reprojection
+        transform, width, height = calculate_default_transform(
+            src.crs, target_crs, src.width, src.height, *src.bounds
+        )
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': target_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+
+    # Generate output path if not provided
+    if output_raster_path is None:
+        output_raster_path = input_raster_path
+
+    # Perform the reprojection
+    with rasterio.open(output_raster_path, 'w', **kwargs) as dst:
+        for i in range(0, src_count):
+            reproject(
+                source=data[i],
+                destination=rasterio.band(dst, i + 1),
+                src_transform=src_transform,
+                src_crs=src_crs,
+                dst_transform=transform,
+                dst_crs=target_crs,
+                resampling=Resampling.nearest
+            )
+
+    return output_raster_path
+
+
+def crop_raster_to_valid_data(raster_path):
+    """
+    Crops a raster to its valid data extent.
+    Args:
+        raster_path (str): Path to raster to crop in place
+    """
+    with rasterio.open(raster_path) as src:
+        # Read the first band and mask
+        data = src.read(1)
+        _, t = os.path.split(raster_path)
+        if np.isnan(src.nodata):
+            mask_valid = ~np.isnan(data)
+        else:
+            mask_valid = data != src.nodata
+
+        # Get row/col bounds of valid data
+        rows, cols = np.where(mask_valid)
+        row_start, row_stop = rows.min(), rows.max() + 1
+        col_start, col_stop = cols.min(), cols.max() + 1
+
+        # Window of valid data
+        window = rasterio.windows.Window(col_start, row_start,
+                                         col_stop - col_start, row_stop - row_start)
+
+        # Read cropped data
+        transform = src.window_transform(window)
+        cropped_data = src.read(window=window)
+
+        # Write back to same file or new one
+        meta = src.meta.copy()
+        meta.update({
+            'height': cropped_data.shape[1],
+            'width': cropped_data.shape[2],
+            'transform': transform
+        })
+
+    with rasterio.open(raster_path, 'w', **meta) as dst:
+        dst.write(cropped_data)

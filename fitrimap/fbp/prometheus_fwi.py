@@ -20,7 +20,7 @@ def get_fwi_indices(dataset_dir,
                     FWI_nc_dir,
                     save_csv=False):
     # Init dataframe and fire_dir
-    df = pd.DataFrame(columns=['Fire ID', 'Year', 'DOY', 'Latitude', 'Longitude', 'Index', 'Value'])
+    df = None
     fire_dir = os.path.join(dataset_dir, fire_id)
 
     if os.path.isdir(fire_dir):
@@ -42,7 +42,7 @@ def get_fwi_indices(dataset_dir,
         bui_nc_path = glob.glob(os.path.join(bui_nc_dir, f'*build_up_index*{year}*.nc'))[0]
         bui = get_FWI(bui_nc_path, 'BUI', doy, year, point)
         row = {'Fire ID': fire_id, 'Year': year, 'DOY': doy, 'Latitude': lat, 'Longitude': lon, 'Index': 'BUI', 'Value': bui}
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+        df = pd.DataFrame([row])
 
         dc_nc_dir = os.path.join(FWI_nc_dir, 'DC')
         dc_nc_path = glob.glob(os.path.join(dc_nc_dir, f'*drought_code*{year}*.nc'))[0]
@@ -74,7 +74,7 @@ def get_fwi_indices(dataset_dir,
         row = {'Fire ID': fire_id, 'Year': year, 'DOY': doy, 'Latitude': lat, 'Longitude': lon, 'Index': 'ISI', 'Value': isi}
         df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
 
-        df.to_csv(os.path.join(fire_dir, f'fwi_{doy}.csv'))
+        df.to_csv(os.path.join(fire_dir, f'fwi_{doy}.csv'), index=False)
 
         index_dict = {'BUI': bui,
                       'DC': dc,

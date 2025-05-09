@@ -14,14 +14,13 @@ from tqdm import tqdm
 import pandas as pd
 from scipy.ndimage import binary_dilation
 
-import fitrimap
-from fitrimap.utils.geospatial_utils import crop_master_to_tif, resize_tif
+from fitrimap.utils.geospatial_utils import crop_master_to_tif, resize_tif, reproject_to_nearest_utm, crop_raster_to_valid_data
 from fitrimap.fuels.recode_fuelmap import recode_fuelmap_RSI
 from fitrimap.topography.get_topo_indices import create_topo_indices
 from fitrimap.fire.above_to_tif import ABoVE_shp_to_tif, load_ABoVE_shp
 from fitrimap.dataset_creation.normalize import get_dataset_stats, normalize_dataset
 from fitrimap.dataset_creation.dataset_tools import plot_dataset_histograms, validate_dataset, replace_dataset_nans
-from fitrimap.fire.cnfdb import get_cnfdb, resize_cnfdb
+from fitrimap.fire.cnfdb import get_cnfdb, resize_cnfdb, reproject_cnfdb
 from fitrimap.fire.fire_cleaning import remove_spot_fires, remove_unburnable
 
 
@@ -60,7 +59,10 @@ def get_data(dataset_dir,
         # Get year, open fuelmap raster
         year = int(fire_id[:4])
         if year != prev_year:
-            master_fuelmap_path = os.path.join(master_fuelmap_dir, f'3979_FBP-{year-1}-100m.tif')
+            if year == 2015 or year == 2020:
+                master_fuelmap_path = os.path.join(master_fuelmap_dir, f'3979_FBP-{year - 1}-100m.tif')
+            else:
+                master_fuelmap_path = os.path.join(master_fuelmap_dir, f'3979_FBP-{year}-100m.tif')
             master_fuelmap = rasterio.open(master_fuelmap_path)
 
         # Check if data already exists; if so, skip
@@ -84,11 +86,15 @@ def get_data(dataset_dir,
             doy = int(avg_value)
 
         # Crop and recode fuel map
-        crop_master_to_tif(master_fuelmap, fire_raster, fuelmap_path, buffer=0)
+        crop_master_to_tif(master_fuelmap, fire_raster, fuelmap_path, buffer_distance=0)
+        reproject_to_nearest_utm(fuelmap_path)
+        crop_raster_to_valid_data(fuelmap_path)
         recode_fuelmap_RSI(fuelmap_path, output_rsi, doy, year, isi_nc4_dir)
 
         # Crop and calculate topography indices
-        crop_master_to_tif(master_dem, fire_raster, topo_path, buffer=0)
+        crop_master_to_tif(master_dem, fire_raster, topo_path, buffer_distance=0)
+        reproject_to_nearest_utm(topo_path)
+        crop_raster_to_valid_data(topo_path)
         create_topo_indices(topo_path, fire_id)
 
         # TODO: get weather
@@ -287,6 +293,7 @@ def create_dataset(dataset_dir, processing_options):
         size_dict = processing_options['get_cnfdb_rasters']['size_dict']
         target_shape = processing_options['get_cnfdb_rasters']['target_shape']
         get_cnfdb(dataset_dir, zip_dir, bad_fires)
+        reproject_cnfdb(dataset_dir)
         resize_cnfdb(dataset_dir, target_shape=target_shape, size_dict=size_dict)
 
     if processing_options['get_data']['include']:
@@ -314,7 +321,7 @@ def create_dataset(dataset_dir, processing_options):
     if processing_options['cleaning']['include']:
         # Remove unburnable fuels
         remove_unburnable(dataset_dir)
-        
+
         # Remove spot fires
         remove_spot_fires(dataset_dir, min_px=6)
 
@@ -362,6 +369,7 @@ if __name__ == '__main__':
     isi_nc4_dir = r'D:\!Research\01 - Python\FiTriMap\ignore_data\FWI\ISI'
     sz = 256
 
+    # %% ABoVE
     # all_fires, fire_areas = load_ABoVE_shp(above_shp_dir)
 
     # with open('all_fires_above_2002_2018.pkl', 'wb') as f:
@@ -386,10 +394,12 @@ if __name__ == '__main__':
     size_dict_above = {'min': quants_above['Q10'],
                        'max': quants_above['Q90'] + 16000}  # 114.20 m
 
+    # %% CNFDB
     quants_cnfdb = {'Q10': 6660.0, 'Q25': 8640.0, 'Q50': 12600.0, 'Q75': 19980.0, 'Q90': 32040.0}
     size_dict_cnfdb = {'min': quants_cnfdb['Q10'],
-                       'max': quants_cnfdb['Q90'] - 6000}
+                       'max': quants_cnfdb['Q90'] - 5000}  # adjustment makes pixel size ~ 105m
 
+    # %% Processing
     processing_options = {
         'create_above_rasters': {
             'include': False,
@@ -400,7 +410,7 @@ if __name__ == '__main__':
             'save_pkl': 'fire_rasters.pkl'
         },
         'get_cnfdb_rasters': {
-            'include': True,
+            'include': False,
             'zip_dir': r'D:\!Research\01 - Python\Piyush\CNN Fire Prediction\Piyush Fire Dataset\Fire growth rasters',
             'size_dict': size_dict_cnfdb,
             'bad_fires': ['2002_375', '2002_389', '2002_640', '2003_64', '2003_362', '2003_393', '2003_412', '2003_586', '2003_602', '2003_633', '2004_546', '2005_2', '2005_7', '2006_366',
@@ -409,33 +419,33 @@ if __name__ == '__main__':
             'target_shape': (sz, sz)
         },
         'get_data': {
-            'include': True,
+            'include': False,
             'master_fuelmap_dir': master_fuelmap_dir,  # str
             'master_dem_path': master_dem_path,  # str
             'isi_nc4_dir': isi_nc4_dir  # str
         },
         'resize': {
-            'include': True,
+            'include': False,
             'shape': (sz, sz)
         },
         'sanitize': {
-            'include': True
+            'include': False
         },
         'cleaning': {
-            'include': True
+            'include': False
         },
         'normalize': {
-            'include': False,
+            'include': True,
             'method': 'minmax'  # str
         },
         'get_fire_stats': {
-            'include': False,
-            'stats_csv': 'cnfdb_256_100m_nospot_stats.csv'  # str
+            'include': True,
+            'stats_csv': 'cnfdb_256_100m_NEW_nospot_stats.csv'  # str
         },
         'make_csv': {
-            'include': False,
-            'output_csv': 'cnfdb_256_100m_nospot_10per.csv',
-            'stats_csv': 'cnfdb_256_100m_nospot_stats.csv',
+            'include': True,
+            'output_csv': 'cnfdb_256_100m_NEW_nospot_10per.csv',
+            'stats_csv': 'cnfdb_256_100m_NEW_nospot_stats.csv',
             'growth_thresh': 0.1,
             'subset': None
         },
@@ -444,7 +454,6 @@ if __name__ == '__main__':
         }
     }
 
-    # Add: spot fire removal / hole filling
     # Add: hybrid dataset creation
 
     create_dataset(dataset_dir, processing_options)

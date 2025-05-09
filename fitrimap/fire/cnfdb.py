@@ -12,6 +12,8 @@ import shutil
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 import numpy as np
 
+from fitrimap.utils.geospatial_utils import reproject_to_nearest_utm
+
 
 def fire_area_quantiles(dataset_dir, quantiles=[0.25, 0.5, 0.75]):
     areas = []  # List to store the maximum dimensions (real-world area) of each fire raster
@@ -117,7 +119,7 @@ def get_cnfdb(dataset_dir, zip_dir, bad_fires=[]):
 
 
 def remove_cnfdb_by_size(dataset_dir, size_dict):
-    # Filter extracted fires based on real-world area
+    # Filter extracted fires based on real-world size
     for folder in os.listdir(dataset_dir):
         folder_path = os.path.join(dataset_dir, folder)
 
@@ -129,17 +131,29 @@ def remove_cnfdb_by_size(dataset_dir, size_dict):
                     # Get pixel resolution (units per pixel)
                     res_x, res_y = abs(src.transform.a), abs(src.transform.e)
 
-                    # Compute real-world area in map units
+                    # Compute real-world size in map units
                     x_dim = src.width * res_x
                     y_dim = src.height * res_y
                     max_dim = max(abs(x_dim), abs(y_dim))
 
-                # If area is out of range, delete the folder
+                # If out of range, delete the folder
                 if max_dim < size_dict.get('min', 0) or max_dim > size_dict.get('max', float('inf')):
                     shutil.rmtree(folder_path)  # Remove entire fire folder
 
 
-def resize_cnfdb(dataset_dir, target_shape, size_dict={}, target_crs='EPSG:3979'):
+def reproject_cnfdb(dataset_dir):
+    pbar = tqdm(total=len(os.listdir(dataset_dir)), desc='Reprojecting')
+    for folder in os.listdir(dataset_dir):
+        folder_path = os.path.join(dataset_dir, folder)
+        fire_tif = os.path.join(folder_path, f'{folder}_burn.tif')
+
+        if os.path.exists(fire_tif):
+            reproject_to_nearest_utm(fire_tif)
+        pbar.update(1)
+    pbar.close()
+
+
+def resize_cnfdb(dataset_dir, target_shape, size_dict={}):
     if size_dict:
         remove_cnfdb_by_size(dataset_dir, size_dict)
 
@@ -171,7 +185,7 @@ def resize_cnfdb(dataset_dir, target_shape, size_dict={}, target_crs='EPSG:3979'
         new_res = (src.res[0] * scale_x, src.res[1] * scale_y)
 
     # 3. Reproject, resize, and pad rasters
-    pbar = tqdm(total=len(os.listdir(dataset_dir)), desc=f'Reprojecting to {target_crs}, resizing to {new_res}, and padding to {target_shape}')
+    pbar = tqdm(total=len(os.listdir(dataset_dir)), desc=f'Resizing to {new_res}, and padding to {target_shape}')
     for folder in os.listdir(dataset_dir):
         folder_path = os.path.join(dataset_dir, folder)
         fire_tif = os.path.join(folder_path, f'{folder}_burn.tif')
@@ -184,7 +198,7 @@ def resize_cnfdb(dataset_dir, target_shape, size_dict={}, target_crs='EPSG:3979'
                 profile = src.profile.copy()
                 # Get reprojected dimensions and transform
                 transform, width, height = calculate_default_transform(
-                    src.crs, target_crs, src.width, src.height, *src.bounds, resolution=new_res
+                    src.crs, src.crs, src.width, src.height, *src.bounds, resolution=new_res
                 )
 
             # Calculate padding needed to center the data
@@ -213,7 +227,7 @@ def resize_cnfdb(dataset_dir, target_shape, size_dict={}, target_crs='EPSG:3979'
             )
 
             profile.update({
-                'crs': target_crs,
+                'crs': src.crs,
                 'transform': new_transform,  # Use the adjusted transform
                 'width': target_width,
                 'height': target_height,
@@ -233,7 +247,7 @@ def resize_cnfdb(dataset_dir, target_shape, size_dict={}, target_crs='EPSG:3979'
                     src_transform=src_transform,
                     src_crs=src_crs,
                     dst_transform=new_transform,  # Use the adjusted transform
-                    dst_crs=target_crs,
+                    dst_crs=src.crs,
                     resampling=Resampling.nearest  # Use nearest neighbor resampling
                 )
                 dst.write(data, 1)
@@ -244,18 +258,21 @@ def resize_cnfdb(dataset_dir, target_shape, size_dict={}, target_crs='EPSG:3979'
 if __name__ == '__main__':
     os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data')
     os.environ['PROJ_DATA'] = r'C:\Users\Labadmin\anaconda3\envs\weather\Lib\site-packages\pyproj\proj_dir\share\proj'
-    dataset_dir = 'CNFDB 256 100m NEW'
+    dataset_dir = 'CNFDB 256 100m NEW2'
     zip_dir = r'D:\!Research\01 - Python\Piyush\CNN Fire Prediction\Piyush Fire Dataset\Fire growth rasters'
     bad_fires = ['2002_375', '2002_389', '2002_640', '2003_64', '2003_362', '2003_393', '2003_412', '2003_586', '2003_602', '2003_633', '2004_546', '2005_2', '2005_7', '2006_366',
                  '2006_671', '2007_96', '2009_339', '2009_397', '2011_317', '2012_248', '2012_250', '2012_545', '2012_745', '2012_851', '2013_288', '2013_567', '2013_805', '2015_155',
                  '2015_1177', '2015_1693', '2016_174', '2017_1860', '2018_494', '2020_359', '2020_343']
-    # get_cnfdb(dataset_dir, zip_dir, bad_fires)
+    get_cnfdb(dataset_dir, zip_dir, bad_fires)
 
-    quants = fire_extent_quantiles(dataset_dir, quantiles=[0.1, 0.25, 0.5, 0.75, 0.9])
-    print(quants)
+    reproject_cnfdb(dataset_dir)
+    quants_reprojected = {'Q10': 7893.091695862057, 'Q25': 10011.3557661293, 'Q50': 14740.889876049858, 'Q75': 23461.53839513778, 'Q90': 37023.251280847566}
+
+    # quants = fire_extent_quantiles(dataset_dir, quantiles=[0.1, 0.25, 0.5, 0.75, 0.9])
+    # print(quants)
 
     # quants = {'Q10': 6660.0, 'Q25': 8640.0, 'Q50': 12600.0, 'Q75': 19980.0, 'Q90': 32040.0}
-    # size_dict = {'min': quants['Q10'],
-    #              'max': quants['Q90'] - 6000}
-    size_dict = None
+    size_dict = {'min': quants_reprojected['Q10'] - 2000,
+                 'max': quants_reprojected['Q90'] - 11000}
+    # size_dict = None
     resize_cnfdb(dataset_dir, target_shape=(256, 256), size_dict=size_dict)
