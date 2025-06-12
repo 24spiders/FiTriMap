@@ -20,6 +20,7 @@ from rasterio.features import shapes
 # Other
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
 
@@ -348,6 +349,88 @@ def plot_date_distribution(dataset_dir):
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.show()
+
+
+def plot_fires(dataset_dir, dataset_csv, mode='base'):
+    """
+    Plots daily wildfire progression maps using raster burn day data.
+
+    Args:
+        dataset_dir (str): Directory containing fire subfolders with raster files.
+        dataset_csv (str): CSV file containing Fire_ID, Burn Day, and Previous Day columns.
+        output_dir (str): Directory where the output plots will be saved.
+        mode (str): Raster filename mode: 'base' for burn.tif or 'nospot' for burn_nospot.tif. Defaults to 'base'.
+
+    Returns:
+        None
+    """
+    # Load the dataset CSV into a DataFrame
+    df = pd.read_csv(os.path.join(dataset_dir, dataset_csv))
+
+    # Create output directory if it does not exist
+    output_dir = dataset_dir + '_IMAGES'
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Initialize progress bar
+    pbar = tqdm(total=len(df), desc='Plotting fires')
+
+    # Iterate over each fire entry
+    for index, row in df.iterrows():
+        # Extract fire metadata
+        fire_id = row['Fire_ID']
+        fid = '_'.join(fire_id.split('_')[:2])
+        burn_day = int(row['Burn Day'])
+        previous_day = int(row['Previous Day (1)'])
+
+        # Get fire raster path based on mode
+        fire_path = os.path.join(dataset_dir, fire_id)
+        if not os.path.isdir(fire_path):
+            raise Exception(f'{fire_id} not found!')
+
+        if mode == 'base':
+            burn_tif = os.path.join(fire_path, f'{fid}_burn.tif')
+        elif mode == 'nospot':
+            burn_tif = os.path.join(fire_path, f'{fid}_burn_nospot.tif')
+        else:
+            raise ValueError('mode must be one of base or nospot')
+
+        # Read raster and identify burn day pixels
+        with rasterio.open(burn_tif) as src:
+            burn_data = src.read(1)
+
+        # Create RGB image for visualization
+        rgb_image = np.zeros((*burn_data.shape, 3), dtype=np.uint8)
+
+        # Black where burn_data == 0
+        rgb_image[burn_data == 0] = [0, 0, 0]
+
+        # Orange (255, 165, 0) where burn_data == previous_day
+        burned_yesterday = burn_data == previous_day
+        if not np.any(burned_yesterday):
+            raise Exception(f'{fire_id}_{burn_day} - no burn on previous day!')
+        rgb_image[burned_yesterday] = [255, 165, 0]
+
+        # Red (255, 0, 0) where burn_data == burn_day
+        burned_today = burn_data == burn_day
+        if not np.any(burned_today):
+            raise Exception(f'{fire_id}_{burn_day} - no burn on burn day!')
+        rgb_image[burned_today] = [255, 0, 0]
+
+        # Plot and save the figure
+        plt.figure(figsize=(6, 6))
+        plt.imshow(rgb_image)
+        plt.title(f'{fire_id}_{burn_day}')
+        plt.axis('off')
+
+        output_path = os.path.join(output_dir, f'{fire_id}_{burn_day}.png')
+        plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
+        plt.close()
+
+        # Update progress bar
+        pbar.update(1)
+
+    # Close progress bar
+    pbar.close()
 
 
 if __name__ == '__main__':

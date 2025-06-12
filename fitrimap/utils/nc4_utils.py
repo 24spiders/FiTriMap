@@ -44,6 +44,7 @@ def load_fwi_nc4(nc_file_path, variable, doy, year, verbose=True):
     lon_var = next((var for var in ['Longitude', 'longitude', 'lon'] if var in dataset.variables), None)
     lats = dataset.variables[lat_var][:]
     lons = dataset.variables[lon_var][:]
+    lons[lons > 180] -= 360
 
     # Create meshgrid of latitudes and longitudes
     lon_grid, lat_grid = np.meshgrid(lons, lats)

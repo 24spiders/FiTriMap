@@ -12,7 +12,7 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling
 from rasterio.crs import CRS
 from shapely.geometry import box, mapping
 from shapely.ops import transform
-from pyproj import Transformer
+import pyproj
 import geopandas as gpd
 import numpy as np
 
@@ -31,7 +31,9 @@ def get_tif_bounds(tif_file):
         bounds = src.bounds
 
         # Get EPSG code
-        epsg_code = src.crs.to_epsg()
+        # epsg_code = src.crs.to_epsg()
+        epsg_code = pyproj.CRS(src.crs).to_epsg()
+
     bound_dict = {'bounds': bounds, 'epsg': epsg_code}
     return bound_dict
 
@@ -71,7 +73,10 @@ def transform_bounds(bound_dict, output_epsg):
     bounds = bound_dict['bounds']
     input_epsg = bound_dict['epsg']
     # Initialize transformer
-    transformer = Transformer.from_crs(f'EPSG:{input_epsg}', f'EPSG:{output_epsg}', always_xy=True)
+    try:
+        transformer = Transformer.from_crs(f'EPSG:{input_epsg}', f'EPSG:{output_epsg}', always_xy=True)
+    except:
+        print(bound_dict)
 
     # Transform coordinates
     xmin, ymin = transformer.transform(bounds[0], bounds[1])

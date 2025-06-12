@@ -19,8 +19,8 @@ from fitrimap.fuels.recode_fuelmap import recode_fuelmap_RSI
 from fitrimap.topography.get_topo_indices import create_topo_indices
 from fitrimap.fire.above_to_tif import ABoVE_shp_to_tif, load_ABoVE_shp
 from fitrimap.dataset_creation.normalize import get_dataset_stats, normalize_dataset
-from fitrimap.dataset_creation.dataset_tools import plot_dataset_histograms, validate_dataset, replace_dataset_nans
-from fitrimap.fire.cnfdb import get_cnfdb, resize_cnfdb, reproject_cnfdb
+from fitrimap.dataset_creation.dataset_tools import plot_dataset_histograms, validate_dataset, replace_dataset_nans, plot_fires
+from fitrimap.fire.cnfdb import get_cnfdb, resize_cnfdb, reproject_fire_rasters
 from fitrimap.fire.fire_cleaning import remove_spot_fires, remove_unburnable
 
 
@@ -104,23 +104,41 @@ def get_data(dataset_dir,
 
 
 def resize_dataset(dataset_dir,
-                   shape=(128, 128)):
+                   shape=None):
     resized_imgs = []
+    skip_burn = False
     # Iterate through the dataset
     dataset_path = Path(dataset_dir)
     pbar = tqdm(total=len(os.listdir(dataset_dir)), desc='Resizing dataset')
     for folder in dataset_path.iterdir():
         if folder.is_dir():
+            if shape is None:
+                fid = '_'.join(folder.name.split('_')[:2])
+                burn_tif = f'{fid}_burn.tif'
+                # Open the raster file
+                with rasterio.open(os.path.join(folder, burn_tif)) as src:
+                    # Get the width (number of columns) of the raster
+                    width = src.width
+                    # Get the height (number of rows) of the raster
+                    height = src.height
+                burn_shape = (width, height)
+                skip_burn = True
+            else:
+                burn_shape = shape
             for tif_file in folder.glob('*.tif'):
                 if '_burn' in tif_file.name:
-                    resampling_method = Resampling.mode
+                    if skip_burn:
+                        continue
+                    else:
+                        resampling_method = Resampling.mode
                 else:
                     resampling_method = Resampling.nearest
 
                 resized_tif = resize_tif(os.path.join(folder, tif_file.name),
-                                         shape=shape,
+                                         shape=burn_shape,
                                          resampling_method=resampling_method)
                 resized_imgs.append(resized_tif)
+
         pbar.update(1)
 
     pbar.close()
@@ -137,7 +155,7 @@ def fire_stats(dataset_dir, output_csv):
         fire_dir = os.path.join(dataset_dir, fire_id)
         if os.path.isdir(fire_dir):
             fid = '_'.join(fire_id.split('_')[:2])
-            burn_file = os.path.join(fire_dir, f'{fid}_burn.tif')
+            burn_file = os.path.join(fire_dir, f'{fid}_burn_nospot.tif')
             # Load the krig_file using rasterio
             with rasterio.open(burn_file) as src:
                 raster_data = src.read(1)  # Read the first (and only) channel
@@ -193,7 +211,7 @@ def make_csv(dataset_dir, stats_csv, output_csv, growth_thresh=0, val_percentage
             fid = '_'.join(fire_id.split('_')[:2])
 
             # Open the raster file
-            raster_path = os.path.join(dataset_dir, fire_id, f'{fid}_burn.tif')
+            raster_path = os.path.join(dataset_dir, fire_id, f'{fid}_burn_nospot.tif')
             with rasterio.open(raster_path) as src:
                 raster_data = src.read(1)  # Read the first band
 
@@ -285,6 +303,7 @@ def create_dataset(dataset_dir, processing_options):
                                         size_dict=size_dict)
         with open(save_pkl, 'wb') as f:
             pickle.dump(fire_rasters, f)
+        reproject_fire_rasters(dataset_dir)
 
     if processing_options['get_cnfdb_rasters']['include']:
         # Get CNFDB rasters
@@ -293,8 +312,8 @@ def create_dataset(dataset_dir, processing_options):
         size_dict = processing_options['get_cnfdb_rasters']['size_dict']
         target_shape = processing_options['get_cnfdb_rasters']['target_shape']
         get_cnfdb(dataset_dir, zip_dir, bad_fires)
-        reproject_cnfdb(dataset_dir)
-        resize_cnfdb(dataset_dir, target_shape=target_shape, size_dict=size_dict)
+        reproject_fire_rasters(dataset_dir)
+        # resize_cnfdb(dataset_dir, target_shape=target_shape, size_dict=size_dict)
 
     if processing_options['get_data']['include']:
         # Get the data
@@ -323,7 +342,7 @@ def create_dataset(dataset_dir, processing_options):
         remove_unburnable(dataset_dir)
 
         # Remove spot fires
-        remove_spot_fires(dataset_dir, min_px=6)
+        remove_spot_fires(dataset_dir)
 
     if processing_options['normalize']['include']:
         # Get dataset normalization values
@@ -351,10 +370,16 @@ def create_dataset(dataset_dir, processing_options):
                  test_percentage=0.1,
                  subset=subset)
 
-    if processing_options['plot']['include']:
+    if processing_options['plot_hists']['include']:
         # Plot dataset hists
-        print('Plotting...')
+        print('Plotting histograms...')
         plot_dataset_histograms(dataset_dir)
+
+    if processing_options['plot_fires']['include']:
+        # Plot fires
+        dataset_csv = processing_options['plot_fires']['dataset_csv']
+        mode = processing_options['plot_fires']['mode']
+        plot_fires(dataset_dir, dataset_csv, mode=mode)
 
     print('\n Done! \n')
 
@@ -362,7 +387,7 @@ def create_dataset(dataset_dir, processing_options):
 if __name__ == '__main__':
     os.environ['PROJ_DATA'] = r'C:\Users\Labadmin\anaconda3\envs\weather\Lib\site-packages\pyproj\proj_dir\share\proj'
     os.chdir(r'D:\!Research\01 - Python\FiTriMap\ignore_data')
-    dataset_dir = 'CNFDB 256 100m NEW'
+    dataset_dir = 'ABoVE FNO'
     above_shp_dir = r'D:\!Research\01 - Python\Piyush\FirePred\Data\Wildfire\Wildfires_Date_of_Burning_1559\unzipped'
     master_fuelmap_dir = r'G:\Shared drives\UofA Wildfire\Project\01 - Machine Learning\Daily Wildfire Prediction\Fuel Maps'
     master_dem_path = r'G:\Shared drives\UofA Wildfire\Project\03 - Imagery\Canada MDEM\mrdem-30-dtm.tif'
@@ -392,7 +417,7 @@ if __name__ == '__main__':
                     'Q75': 2875.4346012604947,
                     'Q90': 9285.051258987989}
     size_dict_above = {'min': quants_above['Q10'],
-                       'max': quants_above['Q90'] + 16000}  # 114.20 m
+                       'max': quants_above['Q90'] + 18000}  # 106.50 m
 
     # %% CNFDB
     quants_cnfdb = {'Q10': 6660.0, 'Q25': 8640.0, 'Q50': 12600.0, 'Q75': 19980.0, 'Q90': 32040.0}
@@ -426,7 +451,7 @@ if __name__ == '__main__':
         },
         'resize': {
             'include': False,
-            'shape': (sz, sz)
+            'shape': None
         },
         'sanitize': {
             'include': False
@@ -435,25 +460,30 @@ if __name__ == '__main__':
             'include': False
         },
         'normalize': {
-            'include': True,
+            'include': False,
             'method': 'minmax'  # str
         },
         'get_fire_stats': {
-            'include': True,
-            'stats_csv': 'cnfdb_256_100m_NEW_nospot_stats.csv'  # str
+            'include': False,
+            'stats_csv': 'cnfdb_fno_nospot_stats.csv'  # str
         },
         'make_csv': {
-            'include': True,
-            'output_csv': 'cnfdb_256_100m_NEW_nospot_10per.csv',
-            'stats_csv': 'cnfdb_256_100m_NEW_nospot_stats.csv',
+            'include': False,
+            'output_csv': 'cnfdb_fno_nospot_10per.csv',
+            'stats_csv': 'cnfdb_fno_nospot_stats.csv',
             'growth_thresh': 0.1,
             'subset': None
         },
-        'plot': {
+        'plot_hists': {
             'include': False
-        }
+        },
+        'plot_fires': {
+            'include': False,
+            'dataset_csv': 'above_256_100m_NEW2_nospot_10per.csv',
+            'mode': 'nospot'}
     }
 
-    # Add: hybrid dataset creation
+    # TODO: hybrid dataset creation
+    # TODO: Remove actioned fires 
 
     create_dataset(dataset_dir, processing_options)

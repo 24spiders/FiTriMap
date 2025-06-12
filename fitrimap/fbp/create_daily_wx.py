@@ -34,7 +34,7 @@ def specific_to_relative_humidity(q, T, P):
     return RH
 
 
-def daily_wx(dataset_dir, weather_dir, FWI_nc_dir, fire_id):
+def daily_wx_merra2(dataset_dir, weather_dir, FWI_nc_dir, fire_id):
     df = None
     fid = '_'.join(fire_id.split('_')[:2])
     fire_weather_dir = os.path.join(weather_dir, fire_id, 'Weather')
@@ -117,6 +117,114 @@ def daily_wx(dataset_dir, weather_dir, FWI_nc_dir, fire_id):
         v_df = pd.read_csv(v_csv)
         us = u_df['U10M'].to_numpy()
         vs = v_df['V10M'].to_numpy()
+        wss = np.sqrt(us**2 + vs**2)
+        min_ws = wss.min()
+        max_ws = wss.max()
+
+        max_idx = np.argmax(wss)
+        u_at_max_ws = us[max_idx]
+        v_at_max_ws = vs[max_idx]
+        wd = math.degrees(math.atan2(u_at_max_ws, v_at_max_ws)) % 360  # atan2 is (y, x) but we swap to (x, y) to go clockwise
+
+        # Get FWI
+        fwi_dict = get_fwi_indices(dataset_dir, fire_id, int(value), FWI_nc_dir, save_csv=True)
+
+        # Create and append new row
+        new_row = {'Daily': daily,
+                   'Min_Temp': min_temp,
+                   'Max_Temp': max_temp,
+                   'Min_RH': min_rh,
+                   'Min_WS': min_ws,
+                   'Max_WS': max_ws,
+                   'WD': wd,
+                   'Precip': precip,
+                   'FFMC': fwi_dict['FFMC'],
+                   'DMC': fwi_dict['DMC'],
+                   'DC': fwi_dict['DC'],
+                   'ISI': fwi_dict['ISI'],
+                   'BUI': fwi_dict['BUI'],
+                   'FWI': fwi_dict['FWI']
+                   }
+        if df is None:
+            df = pd.DataFrame([new_row])
+        else:
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    df.to_csv(os.path.join(dataset_dir, fire_id, f'{fid}_daily_wx.csv'), index=False)
+
+
+def daily_wx_era5(dataset_dir, weather_dir, FWI_nc_dir, fire_id):
+    df = None
+    fid = '_'.join(fire_id.split('_')[:2])
+    fire_weather_dir = os.path.join(weather_dir, fire_id, 'Weather')
+    burn_tif = os.path.join(os.path.join(dataset_dir, fire_id, f'{fid}_burn.tif'))
+
+    # Get unique values
+    with rasterio.open(burn_tif) as src:
+        data = src.read(1)
+
+    _, t = os.path.split(burn_tif)
+    year = t[:4]
+
+    # Mask out 0 and nan values
+    valid_data = data[(data != 0) & (~np.isnan(data))]
+    unique_values = np.unique(valid_data)
+    unique_values = np.sort(unique_values)
+
+    for value in unique_values:
+        # Get daily
+        month, day = doy_to_month_day(year, value)
+        daily = f'{day}/{month}/{year}'
+
+        # Load temp data
+        temp_csv = os.path.join(fire_weather_dir, f'{fid}_t2m_{value}.csv')
+        temp_df = pd.read_csv(temp_csv)
+        min_temp = temp_df['t2m'].min() - 273.15
+        max_temp = temp_df['t2m'].max() - 273.15
+
+        # Get dewpoint temperature
+        dewpoint_csv = os.path.join(fire_weather_dir, f'{fid}_d2m_{value}.csv')  # Dewpoint in K
+        dewpoint_df = pd.read_csv(dewpoint_csv)
+        noon_dewpoints = dewpoint_df[dewpoint_df['hour'] == '12:00:00']
+
+        # Extract identifying values
+        noon_dewpoint_row = noon_dewpoints.loc[noon_dewpoints['d2m'].idxmin()]
+        noon_dewpoint = noon_dewpoint_row['d2m'] - 273.15
+        lat = noon_dewpoint_row['latitude']
+        lon = noon_dewpoint_row['longitude']
+        date = noon_dewpoint_row['date']
+        hour = noon_dewpoint_row['hour']
+
+        # Find the matching temperature value
+        matching_temp_row = temp_df[
+            (temp_df['latitude'] == lat) &
+            (temp_df['longitude'] == lon) &
+            (temp_df['date'] == date) &
+            (temp_df['hour'] == hour)
+        ]
+
+        T = matching_temp_row['t2m'].values[0] - 273.15
+
+        # Get RH https://bmcnoldy.earth.miami.edu/Humidity.html
+        min_rh = 100 * (math.exp((17.625 * noon_dewpoint) / (243.04 + noon_dewpoint)) / math.exp((17.625 * T) / (243.04 + T)))
+
+        # Get precip
+        precip_csv = os.path.join(fire_weather_dir, f'{fid}_tp_{value}.csv')
+
+        precip_df = pd.read_csv(precip_csv)
+        first_latlon = precip_df[['latitude', 'longitude']].drop_duplicates().iloc[0]
+        precip_df = precip_df[(precip_df['latitude'] == first_latlon['latitude']) &
+                              (precip_df['longitude'] == first_latlon['longitude'])]
+        precip = precip_df['tp'].to_numpy()
+        precip = precip.sum()  # All precipitation that day
+        precip = precip * 1000  # From m to mm
+
+        # Load wind data
+        u_csv = os.path.join(fire_weather_dir, f'{fid}_u10_{value}.csv')
+        v_csv = os.path.join(fire_weather_dir, f'{fid}_v10_{value}.csv')
+        u_df = pd.read_csv(u_csv)
+        v_df = pd.read_csv(v_csv)
+        us = u_df['u10'].to_numpy()
+        vs = v_df['v10'].to_numpy()
         wss = np.sqrt(us**2 + vs**2)
         min_ws = wss.min()
         max_ws = wss.max()

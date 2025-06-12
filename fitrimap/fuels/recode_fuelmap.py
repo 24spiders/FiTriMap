@@ -95,6 +95,7 @@ def get_FWI(nc_path, variable, doy, year, point):
     """
     # Load the .nc file corresponding to the year
     df = load_fwi_nc4(nc_path, variable, doy, year, verbose=False)
+    df.to_csv(rf'D:\!Research\01 - Python\FiTriMap\ignore_data\FWI\test_{variable}.csv')
     df = find_nearest_n_points(point[0], point[1], df, n_pts=4)
     avg_index = df[variable].mean()
     return avg_index

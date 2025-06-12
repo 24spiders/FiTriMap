@@ -141,7 +141,7 @@ def remove_cnfdb_by_size(dataset_dir, size_dict):
                     shutil.rmtree(folder_path)  # Remove entire fire folder
 
 
-def reproject_cnfdb(dataset_dir):
+def reproject_fire_rasters(dataset_dir):
     pbar = tqdm(total=len(os.listdir(dataset_dir)), desc='Reprojecting')
     for folder in os.listdir(dataset_dir):
         folder_path = os.path.join(dataset_dir, folder)

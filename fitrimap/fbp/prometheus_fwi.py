@@ -31,7 +31,6 @@ def get_fwi_indices(dataset_dir,
 
         # Get point
         bound_dict = get_tif_bounds(burn_tif)
-        bound_dict['epsg'] = 3979  # TODO: Make this more robust
         xmin, ymin, xmax, ymax = transform_bounds(bound_dict, 4326)
         lat = (ymin + ymax) / 2
         lon = (xmin + xmax) / 2
