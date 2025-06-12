@@ -342,7 +342,7 @@ if __name__ == '__main__':
     #                          resolution)
 
     # ERA5
-    dataset_dir = r'D:\Users\Liam\Documents\01 - University\Research\01 - Python\Piyush\CNFDB 256 100m'
+    dataset_dir = r'D:\Users\Liam\Documents\01 - University\Research\01 - Python\Piyush\CNFDB RAW'
     weather_dest = r'D:\Users\Liam\Documents\01 - University\Research\01 - Python\Piyush\CNFDB 100m ERA5'
     nc4_dir = r'D:\Users\Liam\Documents\01 - University\Research\01 - Python\FiTriMap\ignore_data\ERA5-Land NC4s'
     variables = ['d2m', 't2m', 'u10', 'v10', 'sp', 'tp']
